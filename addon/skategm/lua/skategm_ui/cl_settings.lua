@@ -244,7 +244,6 @@ function SET.AdvancedPage()
 		BoolRow("Board sounds", "skategm_sounds"),
 		NumberRow("Sound volume", "skategm_sound_volume", 0, 2, 0.1, Percent),
 		NumberRow("Boombox volume", "skategm_boombox_volume", 0, 1, 0.05, function(v) return v <= 0 and "muted" or Percent(v) end),
-		BoolRow("Show other players' board images", "skategm_show_board_images"),
 		List.Heading("Controller"),
 		ChoiceRow("Button icons", "skategm_button_style", UI.pad.STYLE_NAMES, nil, 0),
 		List.Heading("Riding"),
@@ -297,11 +296,28 @@ function SET.AdvancedPage()
 	return { title = "Advanced", rows = rows }
 end
 
+function SET.DisplayPage()
+	return { title = "Display", rows = {
+		BoolRow("Show the HUD", "skategm_hud"),
+		List.Heading("HUD"),
+		BoolRow("Total score", "skategm_hud_total"),
+		BoolRow("Line score and multiplier", "skategm_hud_line"),
+		BoolRow("Trick names", "skategm_hud_trick"),
+		BoolRow("Call-outs (clean, sketchy, marker set...)", "skategm_hud_callouts"),
+		BoolRow("LB overlay (marker and LB controls)", "skategm_hud_lb"),
+		BoolRow("Marker beacon", "skategm_hud_marker"),
+		BoolRow("Flick-it stick", "skategm_flickit_hud"),
+		List.Heading("Other players"),
+		BoolRow("Show other players' board images", "skategm_show_board_images"),
+	} }
+end
+
 function SET.MainPage()
 	return { title = "Settings", rows = {
 		{ label = "Playermodel", page = SET.PlayerPage, sub = "your model and colour" },
 		{ label = "Board", page = SET.BoardPage, sub = "colours, image, effects, sounds" },
 		{ label = "Camera", page = SET.CameraPage, sub = "wobble, distance, field of view" },
+		{ label = "Display", page = SET.DisplayPage, sub = "what the HUD shows" },
 		{ label = "Advanced", page = SET.AdvancedPage, sub = "everything else" },
 	} }
 end

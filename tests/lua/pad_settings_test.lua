@@ -10,7 +10,8 @@ timer = { Simple = function(_, f) f() end }
 -- convars, as GMod keeps them; RunConsoleCommand sets them
 local cvars_ = { cl_playermodel = "kleiner", cl_playercolor = "0.24 0.34 0.41", skategm_camera_shake = "0", skategm_camera_distance = "1", skategm_camera_fov = "0",
 	skategm_board_type = "classic", skategm_deck_color = "255 255 255", skategm_wheel_color = "25 25 25", skategm_board_image = "", skategm_rocket = "0",
-	skategm_hoverboard = "0", skategm_roll_sound = "1", skategm_rocket_sound = "1", skategm_grip_pattern = "1" }
+	skategm_hoverboard = "0", skategm_roll_sound = "1", skategm_rocket_sound = "1", skategm_grip_pattern = "1",
+	skategm_hud = "1", skategm_hud_total = "1", skategm_flickit_hud = "0" }
 function GetConVar(n) if cvars_[n] == nil then return nil end return { GetString = function() return cvars_[n] end, GetFloat = function() return tonumber(cvars_[n]) or 0 end } end
 local played, reset = {}, false
 RunConsoleCommand = function(n, v) cvars_[n] = v end
@@ -49,7 +50,23 @@ frame(bit.bor(B.LB, B.A))
 frame(0)
 local labels = {}
 for _, r in ipairs(SET.Top().rows) do labels[#labels + 1] = r.label end
-check("LB + A opens Settings: Playermodel, Board, Camera, Advanced", SET.Active() and table.concat(labels, ",") == "Playermodel,Board,Camera,Advanced" and api.frozen and api.blocked)
+check("LB + A opens Settings: Playermodel, Board, Camera, Display, Advanced", SET.Active() and table.concat(labels, ",") == "Playermodel,Board,Camera,Display,Advanced" and api.frozen and api.blocked)
+
+go("Display")
+press(B.A)
+local dlabels = {}
+for _, r in ipairs(UI.List.Rows(SET.Top())) do dlabels[#dlabels + 1] = r.label end
+local dl = table.concat(dlabels, ",")
+check("Display: the HUD switch, each HUD part, other players' images", SET.Top().title == "Display" and dl:find("Show the HUD", 1, true) and dl:find("Total score", 1, true)
+	and dl:find("Flick-it stick", 1, true) and dl:find("board images", 1, true))
+go("Flick-it stick")
+press(B.A)
+check("... the Flick-it stick (off by default) turns on from there", cvars_.skategm_flickit_hud == "1")
+go("Total score")
+press(B.A)
+check("... and the total score off", cvars_.skategm_hud_total == "0")
+press(B.B)
+check("B goes back to the main page", SET.Top().title == "Settings")
 
 -- Camera
 go("Camera")

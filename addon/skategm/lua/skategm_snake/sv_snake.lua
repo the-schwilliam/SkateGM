@@ -13,11 +13,7 @@ local function Alive(ply) local e = Entry(ply) return e ~= nil and e.playing and
 
 local Num = SKATEGM_MODES.Num
 
-local function Ground(x, y, z)
-	if not util.TraceLine then return z end
-	local tr = util.TraceLine({ start = Vector(x, y, z + 600), endpos = Vector(x, y, z - 1200), mask = MASK_SOLID_BRUSHONLY })
-	return tr.Hit and tr.HitPos.z or z
-end
+local function Ground(x, y, z) return SKATEGM_MODES.Ground(x, y, z) end
 
 local function Public(now)
 	local t = { phase = G.phase }

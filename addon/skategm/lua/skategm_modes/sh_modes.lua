@@ -82,12 +82,39 @@ function M.Clock(t)
 	return string.format("%d:%02d", math.floor(t / 60), t % 60)
 end
 
+
+-- the walkable surface at (x, y) closest in height to ref: every surface down a
+-- vertical line through world and props (hills, ramps, a floor under a roof),
+-- not just brushes, so props-made maps get it right
+M.GROUND_SPAN, M.GROUND_STEPS = 1536, 16
+function M.Ground(x, y, ref)
+	if not (util and util.TraceLine) then return ref end
+	local best, bestGap
+	local z, bottom = ref + M.GROUND_SPAN, ref - M.GROUND_SPAN
+	for _ = 1, M.GROUND_STEPS do
+		if z <= bottom then break end
+		local tr = util.TraceLine({ start = Vector(x, y, z), endpos = Vector(x, y, bottom), mask = MASK_PLAYERSOLID })
+		if not tr.Hit or tr.HitSky then break end
+		local hz = tr.HitPos.z
+		if not tr.StartSolid and tr.HitNormal and tr.HitNormal.z > 0.5 then
+			local gap = math.abs(hz - ref)
+			if not bestGap or gap < bestGap then best, bestGap = hz, gap end
+		end
+		z = math.min(z, hz) - 8
+	end
+	return best or ref
+end
+
 if SERVER then
-	hook.Add("SkateGMCanRespawn", "skategm_modes", function(ply)
+	function M.PlayerInPlay(ply)
 		local mode, key = M.SessionOf(ply)
-		if not mode then return end
+		if not mode then return false end
 		local st = (mode.live and key ~= true) and mode:SessionData(key) or mode.lastState
-		if M.InPlay(st) then return false end
+		return M.InPlay(st)
+	end
+
+	hook.Add("SkateGMCanRespawn", "skategm_modes", function(ply)
+		if M.PlayerInPlay(ply) then return false end
 	end)
 
 	function Mode:UseSessions(live)
@@ -611,11 +638,45 @@ else
 		return P and P.T and P.T(t) or t
 	end
 
+	function M.ChatLine(text, kind)
+		if kind ~= "none" or type(text) ~= "string" or not text:match("^%[[^%]]+%] ") then return nil end
+		local out = M.ButtonWords(text)
+		if out ~= text then return out end
+	end
+	if hook and hook.Add then
+		hook.Add("ChatText", "skategm_modes_buttons", function(_, _, text, kind)
+			local line = M.ChatLine(text, kind)
+			if line then
+				chat.AddText(color_white, line)
+				return true
+			end
+		end)
+	end
+
 	function M.Text(t, font, x, y, col, ax, offset)
 		offset = offset or 2
 		t = M.ButtonWords(t)
 		draw.SimpleText(t, font, x + offset, y + offset, shadow, ax or TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 		draw.SimpleText(t, font, x, y, col or color_white, ax or TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	end
+
+	M.WALL_SEGMENTS = 96
+	M.walls = {}
+	function M.AreaWall(center, radius, col)
+		local key = string.format("%.0f %.0f %.0f", center.x, center.y, radius)
+		local edges = M.walls[key]
+		if not edges then
+			edges = {}
+			for i = 1, M.WALL_SEGMENTS do
+				local a0, a1 = (i - 1) / M.WALL_SEGMENTS * math.pi * 2, i / M.WALL_SEGMENTS * math.pi * 2
+				edges[i] = { Vector(center.x + math.cos(a0) * radius, center.y + math.sin(a0) * radius, 0),
+					Vector(center.x + math.cos(a1) * radius, center.y + math.sin(a1) * radius, 0) }
+			end
+			M.walls[key] = edges
+		end
+		local B = SkateGM and SkateGM.boundary
+		if B and B.DrawBand then B.DrawBand(edges, col, center.z) end
+		if B and B.DrawEdges then B.DrawEdges(edges, col) end
 	end
 
 	function M.Ring(center, radius, col, segments)

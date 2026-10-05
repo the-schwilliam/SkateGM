@@ -41,6 +41,8 @@ function ED.MayEdit(ply)
 	local v = cvAllowed:GetInt()
 	if v == 0 then return false, "the park editor is turned off on this server" end
 	if v == 2 and not Admin(ply) then return false, "only admins can use the park editor here" end
+	local M = SKATEGM_MODES
+	if M and M.PlayerInPlay and M.PlayerInPlay(ply) then return false, "not while your minigame is on" end
 	return true
 end
 
@@ -50,7 +52,11 @@ function ED.MayChange(ply, e)
 	return e.SkateGMOwner == ply
 end
 
-local function Editing(ply) return IsValid(ply) and ply.SkateGMEditing == true end
+local function Editing(ply)
+	if not (IsValid(ply) and ply.SkateGMEditing == true) then return false end
+	local M = SKATEGM_MODES
+	return not (M and M.PlayerInPlay and M.PlayerInPlay(ply))
+end
 
 local function Reply(ply, text) if IsValid(ply) then ply:ChatPrint("[SkateGM] " .. text) end end
 

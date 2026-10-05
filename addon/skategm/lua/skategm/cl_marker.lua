@@ -29,35 +29,46 @@ end
 -- while LB is held: a D-pad, each action written beyond its own arm (up
 -- above, down below, left and right to the sides); RB and X in a column to
 -- the right
+CreateClientConVar("skategm_hud_lb", "1", true, false, "Show the LB overlay (marker and LB controls)", 0, 1)
+CreateClientConVar("skategm_hud_marker", "1", true, false, "Show the marker beacon", 0, 1)
 function S.MarkerPaint(w, h)
 	if S.noPad then
-		Shadowed("Connect a controller to skate", "skategm_big", w / 2, h * 0.45, Color(255, 220, 120), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		Shadowed("No controller found", "skategm_big", w / 2, h * 0.45, Color(255, 220, 120), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		local found = S.padName and S.padName:match("^none usable %((.+)%)$")
 		local why = found and (found .. ": add its mapping to garrysmod/data/skategm/gamecontrollerdb.txt")
-			or "Xbox, PlayStation, Switch Pro and most other pads work - Skater mode is controller only"
+			or "Xbox, PlayStation, Switch Pro and most other pads work"
 		Shadowed(why, "skategm_cmid", w / 2, h * 0.45 + h * 0.035, Color(230, 230, 230), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		Shadowed("or skate with the keyboard: W / Space push, A / D steer, arrows for tricks, Enter for menus", "skategm_cmid", w / 2, h * 0.45 + h * 0.065,
+			Color(200, 220, 235), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	end
 	-- (input taken by a menu or the park editor: the engine never saw LB let go)
-	if not MK.active or S.inputBlocked then return end
+	if not MK.active or S.inputBlocked or not S.HudShows("skategm_hud_lb") then return end
 	local cx, cy = w / 2, h * 0.82
 	local u = math.max(8, math.floor(h * 0.018)) -- one arm's width
 	local gap = u * 0.45 -- between an arm and its words
 	local on, offc = Color(120, 220, 255, 235), Color(150, 150, 150, 150)
 	local games = SKATEGM_MODES ~= nil and SKATEGM_MODES.menu ~= nil
-	local function arm(x, y, lit)
+	local PAD = SKATEGM_UI and SKATEGM_UI.pad
+	local keys = PAD and PAD.KeyboardHints and PAD.KeyboardHints()
+	if keys and PAD.Fonts then PAD.Fonts() end
+	local function arm(x, y, lit, name)
 		surface.SetDrawColor(0, 0, 0, 160)
 		surface.DrawRect(x - 2, y - 2, u + 4, u + 4)
 		local c = lit and on or Color(70, 70, 70, 210)
 		surface.SetDrawColor(c.r, c.g, c.b, c.a)
 		surface.DrawRect(x, y, u, u)
+		local label = keys and name and PAD.KeyLabel(name)
+		if label then
+			draw.SimpleText(label, "skategm_ui_key", x + u / 2, y + u / 2, lit and Color(10, 10, 10) or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
 	end
 	local blocked = S.markerBlockSent
 	local canReturn, canPlace = MK.canReturn and not blocked, MK.canPlace and not blocked
 	arm(cx - u / 2, cy - u / 2, false)
-	arm(cx - u / 2, cy - u * 1.5, canReturn)
-	arm(cx - u / 2, cy + u / 2, canPlace)
-	arm(cx - u * 1.5, cy - u / 2, games)
-	arm(cx + u / 2, cy - u / 2, games)
+	arm(cx - u / 2, cy - u * 1.5, canReturn, "UP")
+	arm(cx - u / 2, cy + u / 2, canPlace, "DOWN")
+	arm(cx - u * 1.5, cy - u / 2, games, "LEFT")
+	arm(cx + u / 2, cy - u / 2, games, "RIGHT")
 	local top, bottom, left, right = cy - u * 1.5 - gap, cy + u * 1.5 + gap, cx - u * 1.5 - gap, cx + u * 1.5 + gap
 	if blocked then
 		Shadowed("no markers in a minigame", "skategm_cmid", cx, top, offc, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
@@ -86,7 +97,7 @@ end
 
 -- a glowing post where the marker is
 function S.MarkerDraw()
-	if not MK.pos then return end
+	if not MK.pos or not S.HudShows("skategm_hud_marker") then return end
 	render.SetColorMaterial()
 	local base = MK.pos - Vector(0, 0, 10)
 	local pulse = 0.6 + 0.4 * math.sin(RealTime() * 4)

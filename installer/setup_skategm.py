@@ -18,7 +18,19 @@ if (ROOT / 'exporter').is_dir():
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'exporter'))
 
-TITLE = 'SkateGM Setup'
+
+
+def version():
+    for path in (ROOT / 'VERSION', Path(__file__).resolve().parent.parent / 'VERSION'):
+        try:
+            return path.read_text(encoding='utf-8').strip()
+        except OSError:
+            pass
+    return ''
+
+
+VERSION = version()
+TITLE = f'SkateGM {VERSION} Setup' if VERSION else 'SkateGM Setup'
 DLL = 'gmcl_skategm_win64.dll'
 BIN_EXTRAS = ['skategm_sdl2.dll', 'skategm_gamecontrollerdb.txt']
 OLD_FILES = ['lua/bin/gmcl_sk8_win64.dll']
@@ -130,7 +142,7 @@ def remove_tree(path):
         raise RuntimeError(IN_USE)
 
 
-def install(gmod, xex, data, report, skip_convert=False):
+def install(gmod, xex, data, report, skip_convert=False, build_maps=True, map_names=None):
     gmod = Path(gmod)
     if not is_gmod(gmod):
         raise RuntimeError(f"{gmod} doesn't look like Garry's Mod (no garrysmod folder).")
@@ -142,6 +154,7 @@ def install(gmod, xex, data, report, skip_convert=False):
         if not xex:
             raise RuntimeError("Choose your Skate 3 disc image (.iso) or default.xex.")
         convert(xex, data, report)
+        remember_source(data, xex)
     if not data_ready(data):
         raise RuntimeError('The game data conversion did not finish.')
     report('Installing the add-on...')
@@ -159,8 +172,43 @@ def install(gmod, xex, data, report, skip_convert=False):
         raise RuntimeError("Couldn't replace the engine module: close Garry's Mod and try again.")
     (garrysmod / 'data' / 'skategm').mkdir(parents=True, exist_ok=True)
     (garrysmod / 'data' / 'skategm' / 'datapath.txt').write_text(str((data / 'assets').resolve()).replace('\\', '/'), encoding='utf-8')
+    if build_maps:
+        install_maps(gmod, xex or remembered_source(data), data, report, map_names)
     report('Done! Start Garry\'s Mod and pick the SkateGM gamemode, or in any other gamemode type '
            '"bind j skategm_toggle" in the console once and press J.')
+
+
+def remember_source(data, xex):
+    try:
+        (Path(data) / 'source.txt').write_text(str(Path(xex).resolve()), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def remembered_source(data):
+    try:
+        path = Path((Path(data) / 'source.txt').read_text(encoding='utf-8').strip())
+    except OSError:
+        return None
+    return path if path.exists() else None
+
+
+def install_maps(gmod, game, data, report, names=None):
+    if not game:
+        report('Skate 3 maps: choose your Skate 3 disc image (.iso) or default.xex to build them.')
+        return
+    report('Building the Skate 3 maps (a few minutes each)...')
+    try:
+        from mapgen.install import install_maps as build_all
+        built, failed = build_all(game, gmod, Path(data) / 'mapgen', report, names=names)
+    except Exception as error:
+        traceback.print_exc()
+        report('Skate 3 maps were skipped: ' + (str(error) or type(error).__name__))
+        return
+    if failed:
+        report('Some maps could not be built: ' + ', '.join(failed))
+    if built:
+        report('Built: ' + ', '.join(built))
 
 
 def uninstall(gmod, data, report, remove_data=False):
@@ -173,6 +221,7 @@ def uninstall(gmod, data, report, remove_data=False):
         except PermissionError:
             raise RuntimeError("Couldn't remove the engine module: close Garry's Mod and try again.")
     (garrysmod / 'data' / 'skategm' / 'datapath.txt').unlink(missing_ok=True)
+    remove_tree(garrysmod / 'addons' / 'skategm_maps')
     if remove_data:
         shutil.rmtree(data, ignore_errors=True)
     report('SkateGM removed.' + (' Your converted game data was deleted too.' if remove_data else ''))
@@ -181,6 +230,27 @@ def uninstall(gmod, data, report, remove_data=False):
 # --------------------------------------------------------------------------
 # the window
 # --------------------------------------------------------------------------
+def map_choices():
+    try:
+        from mapgen.regions import REGIONS
+    except Exception:
+        traceback.print_exc()
+        return []
+    return [(r.map_name, f'{r.title} ({r.map_name})') for r in REGIONS]
+
+
+def outdated_maps(gmod):
+    try:
+        from mapgen import install as mapinstall
+        from mapgen.regions import REGIONS
+    except Exception:
+        return []
+    state = mapinstall.read_state(gmod)
+    maps = mapinstall.addon_dir(gmod) / 'maps'
+    return [r.map_name for r in REGIONS
+            if (maps / f'{r.map_name}.bsp').is_file() and state.get(r.map_name, {}).get('key') != mapinstall.region_key(r)]
+
+
 def window():
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -197,7 +267,22 @@ def window():
 
     frm = ttk.Frame(root, padding=12)
     frm.grid()
-    ttk.Label(frm, text='SkateGM', font=('Segoe UI', 16, 'bold')).grid(column=0, row=0, columnspan=3, sticky='w')
+    header = ttk.Frame(frm)
+    header.grid(column=0, row=0, columnspan=3, sticky='w')
+    try:
+        logo = tk.PhotoImage(file=str(payload_dir('addon') / 'materials' / 'skategm' / 'logo.png')).subsample(3, 3)
+        ttk.Label(header, image=logo).grid(column=0, row=0, sticky='w')
+        header.logo = logo
+    except tk.TclError:
+        ttk.Label(header, text='SkateGM', font=('Segoe UI', 16, 'bold')).grid(column=0, row=0, sticky='w')
+    if VERSION:
+        ttk.Label(header, text=f'Version {VERSION}', font=('Segoe UI', 11)).grid(column=1, row=0, sticky='sw', padx=(12, 0), pady=(0, 6))
+    try:
+        icon = tk.PhotoImage(file=str(payload_dir('addon') / 'gamemodes' / 'skategm' / 'icon24.png'))
+        root.iconphoto(True, icon)
+        root.icon = icon
+    except tk.TclError:
+        pass
     ttk.Label(frm, text='You need your own legally dumped Xbox 360 copy of the game: choose its disc image (.iso), '
                         'or default.xex from an extracted copy. '
                         'Its data is converted on this PC; nothing is downloaded.', wraplength=520).grid(column=0, row=1, columnspan=3, sticky='w', pady=(0, 8))
@@ -231,14 +316,28 @@ def window():
     reuse = tk.BooleanVar(value=False)
     reuse_box = ttk.Checkbutton(frm, text='Keep the game data I already converted (skip converting)', variable=reuse)
     reuse_box.grid(column=0, row=6, columnspan=3, sticky='w')
+    maps = tk.BooleanVar(value=False)
+    choices = ttk.Frame(frm)
+    picks = {}
+    for i, (name, title) in enumerate(map_choices()):
+        picks[name] = tk.BooleanVar(value=True)
+        ttk.Checkbutton(choices, text=title, variable=picks[name]).grid(column=i % 2, row=i // 2, sticky='w', padx=(24, 12))
+
+    def show_choices():
+        if maps.get() and picks:
+            choices.grid(column=0, row=8, columnspan=3, sticky='w')
+        else:
+            choices.grid_remove()
+    ttk.Checkbutton(frm, text='Generate maps (slow)', variable=maps,
+                    command=show_choices).grid(column=0, row=7, columnspan=3, sticky='w')
 
     log = tk.Text(frm, width=74, height=10, state='disabled', wrap='word')
-    log.grid(column=0, row=7, columnspan=3, pady=8, padx=10)
+    log.grid(column=0, row=9, columnspan=3, pady=8, padx=10)
     bar = ttk.Progressbar(frm, mode='indeterminate', length=520)
-    bar.grid(column=0, row=8, columnspan=3)
+    bar.grid(column=0, row=10, columnspan=3)
 
     buttons = ttk.Frame(frm)
-    buttons.grid(column=0, row=9, columnspan=3, pady=(8, 0), sticky='e')
+    buttons.grid(column=0, row=11, columnspan=3, pady=(8, 0), sticky='e')
 
     def check():
         notes = []
@@ -249,6 +348,11 @@ def window():
             notes.append("That folder isn't Garry's Mod: choose the one with the garrysmod folder inside.")
         elif not on_x64_branch(g):
             notes.append("Garry's Mod isn't on the x86-64 branch yet. In Steam: right-click Garry's Mod > Properties > Betas > choose x86-64, then let it update. SkateGM needs it.")
+        if g and is_gmod(g):
+            old = outdated_maps(g)
+            if old:
+                notes.append(f"{len(old)} of your Skate 3 maps came from an older SkateGM ({', '.join(old)}). Tick Generate maps to "
+                             "rebuild them: friends whose map differs from yours can't join you.")
         has = data_ready(data_var.get().strip() or DEFAULT_DATA)
         if has:
             reuse_box.state(['!disabled'])
@@ -298,7 +402,9 @@ def window():
             return messagebox.showerror(TITLE, "Choose your Garry's Mod folder first.")
         if not reuse.get() and not x:
             return messagebox.showerror(TITLE, 'Choose your Skate 3 disc image (.iso) or default.xex first.')
-        run(lambda: install(g, x, d, say, skip_convert=reuse.get()))
+        chosen = [name for name, var in picks.items() if var.get()]
+        build = maps.get() and (bool(chosen) or not picks)
+        run(lambda: install(g, x, d, say, skip_convert=reuse.get(), build_maps=build, map_names=chosen or None))
 
     def do_uninstall():
         g = gmod_var.get().strip()
@@ -325,6 +431,8 @@ def window():
 
 
 def main():
+    import multiprocessing
+    multiprocessing.freeze_support()
     if sys.stdout is None:
         try:
             sys.stdout = open(1, 'w', encoding='utf-8', errors='replace', closefd=False)
@@ -343,6 +451,9 @@ def main():
     parser.add_argument('--xex', type=Path)
     parser.add_argument('--data', type=Path, default=DEFAULT_DATA)
     parser.add_argument('--skip-convert', action='store_true')
+    parser.add_argument('--build-maps', action='store_true', help='build the Skate 3 maps (slow)')
+    parser.add_argument('--no-maps', action='store_true', help="don't build the Skate 3 maps (the default)")
+    parser.add_argument('--maps', help='build only these maps (comma separated, e.g. sgm_skate3_maloof)')
     parser.add_argument('--uninstall', action='store_true')
     parser.add_argument('--remove-data', action='store_true')
     parser.add_argument('--find', action='store_true', help="just print where Garry's Mod is")
@@ -360,7 +471,9 @@ def main():
         else:
             if not on_x64_branch(gmod):
                 print("WARNING: Garry's Mod isn't on the x86-64 branch (Steam > Properties > Betas > x86-64); SkateGM needs it.")
-            install(gmod, args.xex, args.data, print, skip_convert=args.skip_convert)
+            names = [n.strip() for n in args.maps.split(',') if n.strip()] if args.maps else None
+            install(gmod, args.xex, args.data, print, skip_convert=args.skip_convert, build_maps=(args.build_maps or bool(names)) and not args.no_maps,
+                    map_names=names)
     except Exception as error:
         traceback.print_exc()
         print('ERROR: ' + str(error))

@@ -437,7 +437,10 @@ function MENU.DrawWorld()
 	if screen and screen.values and screen.mode and screen.mode.hostDef then
 		for _, o in ipairs(screen.mode.hostDef.options or {}) do
 			local v = screen.values[o.key]
-			if o.type == "region" and v then M.Ring(M.Here() + Vector(0, 0, 4), v, BLUE, 64) end
+			if o.type == "region" and v then
+				M.Ring(M.Here() + Vector(0, 0, 4), v, BLUE, 64)
+				M.AreaWall(M.Here(), v, BLUE)
+			end
 			if o.type == "point" and v then M.Beacon(v.pos, o.color or BLUE, 3000) end
 		end
 	end

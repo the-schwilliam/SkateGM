@@ -156,7 +156,7 @@ end
 function C.DrawWorld()
 	local st = C.state
 	if st.phase == "idle" then return end
-	if st.area then SKATEGM_MODES.Ring(Vector(st.area[1], st.area[2], st.area[3] + 4), st.area[4], Color(120, 255, 120, 200), 96) end
+	if st.area then SKATEGM_MODES.AreaWall(Vector(st.area[1], st.area[2], st.area[3]), st.area[4], Color(120, 255, 120)) end
 	render.SetColorMaterial()
 	for ent, t in pairs(C.trails) do
 		local slot, out = C.SlotOf(ent)

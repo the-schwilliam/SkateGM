@@ -32,7 +32,7 @@ if file and file.CreateDir then
 end
 
 ---------------------------------------------------------------------------
--- a clip: { { t, P, state, trick }, ... }, t from 0
+-- a clip: { { t, P, state, trick, rocket }, ... }, t from 0
 ---------------------------------------------------------------------------
 function R.Duration(clip) return clip and #clip > 0 and clip[#clip].t or 0 end
 
@@ -66,6 +66,15 @@ function R.Encode(clip, meta, edit)
 		if edit.trim then lines[#lines + 1] = string.format("trim %.3f %.3f", edit.trim[1], edit.trim[2]) end
 		for _, k in ipairs(edit.keys or {}) do lines[#lines + 1] = R.EncodeKey(k) end
 	end
+	local from
+	for i, f in ipairs(clip) do
+		if f.rocket and not from then from = f.t end
+		local nxt = clip[i + 1]
+		if from and not (nxt and nxt.rocket) then
+			lines[#lines + 1] = string.format("rocket %.3f %.3f", from, f.t)
+			from = nil
+		end
+	end
 	for _, f in ipairs(clip) do
 		local nums = {}
 		for _, name in ipairs(S.BONES) do
@@ -81,6 +90,7 @@ function R.Decode(text)
 	if type(text) ~= "string" or text:sub(1, 16) ~= "skategm replay 1" then return nil end
 	local clip, meta = {}, {}
 	local edit = { filter = "none", keys = {} }
+	local rockets = {}
 	for line in text:gmatch("[^\n]+") do
 		local k, v = line:match("^(%a+) (.*)$")
 		if k == "map" or k == "date" then
@@ -90,6 +100,9 @@ function R.Decode(text)
 		elseif k == "trim" then
 			local a, b = v:match("^([%d%.%-]+) ([%d%.%-]+)$")
 			if a then edit.trim = { tonumber(a), tonumber(b) } end
+		elseif k == "rocket" then
+			local a, b = v:match("^([%d%.%-]+) ([%d%.%-]+)$")
+			if a then rockets[#rockets + 1] = { tonumber(a) - 0.0005, tonumber(b) + 0.0005 } end
 		elseif k == "key" then
 			local key = R.DecodeKey(line)
 			if key then edit.keys[#edit.keys + 1] = key end
@@ -108,6 +121,11 @@ function R.Decode(text)
 		end
 	end
 	if #clip < 2 then return nil end
+	for _, f in ipairs(clip) do
+		for _, s in ipairs(rockets) do
+			if f.t >= s[1] and f.t <= s[2] then f.rocket = true break end
+		end
+	end
 	table.sort(edit.keys, function(a, b) return a.t < b.t end)
 	if edit.trim then
 		local dur = clip[#clip].t
@@ -215,6 +233,7 @@ function R.Feed(now)
 	if not P then return end
 	S.remote[v.key] = { snaps = { { t = now - 1, P = P }, { t = now + 1, P = P } }, last = now, state = frame and frame.state }
 	v.P, v.frame = P, frame
+	if frame and frame.rocket and S.RocketFlames then pcall(S.RocketFlames, P, now, v.key, true) end
 end
 
 function R.Current()
@@ -249,7 +268,6 @@ function R.Scrub(dt)
 	local v = R.on
 	local a, b = R.Trim()
 	v.t = math.Clamp(v.t + dt, a, b)
-	if #v.edit.keys > 0 then v.manual = nil end
 end
 
 R.TRIM_RATE, R.TRIM_MIN = 3, 0.5
@@ -372,7 +390,7 @@ function R.Think(pad, now, dt)
 	local v = R.on
 	if not v then return end
 	if R.exporting then
-		R.ExportThink()
+		R.ExportThink(dt)
 	elseif not R.done then
 		local a, b = R.Trim()
 		if v.playing then
@@ -431,15 +449,17 @@ end
 function R.ExportPage()
 	local v = R.on
 	local List = UI.List
-	v.exportFps, v.exportQuality = v.exportFps or 1, v.exportQuality or 2
+	v.exportFps, v.exportQuality, v.exportSound = v.exportFps or 1, v.exportQuality or 2, v.exportSound or 1
 	local fps, qualities = {}, {}
 	for i, f in ipairs(R.EXPORT_FPS) do fps[i] = f .. " fps" end
 	for i, q in ipairs(R.EXPORT_QUALITY) do qualities[i] = q[1] end
 	return { title = "Export video", rows = {
 		List.Choice("Frame rate", fps, function() return v.exportFps end, function(i) v.exportFps = i end),
 		List.Choice("Quality", qualities, function() return v.exportQuality end, function(i) v.exportQuality = i end),
-		{ label = "Start export", sub = string.format("%.1f s of replay (the trimmed part)", select(2, R.Trim()) - R.Trim()), run = function()
-			R.Export(R.EXPORT_FPS[v.exportFps], v.exportQuality)
+		List.Choice("Sound", R.EXPORT_SOUND, function() return v.exportSound end, function(i) v.exportSound = i end),
+		{ label = "Start export", sub = v.exportSound == 2 and "the picture first, then the sound in real time (takes about twice as long)"
+			or string.format("%.1f s of replay (the trimmed part)", select(2, R.Trim()) - R.Trim()), run = function()
+			R.Export(R.EXPORT_FPS[v.exportFps], v.exportQuality, v.exportSound == 2)
 		end },
 	} }
 end
@@ -530,7 +550,7 @@ function R.Hints()
 	rows[#rows + 1] = { keys = { "RB" }, text = "Shake" }
 	rows[#rows + 1] = { keys = { "Y" }, text = "Set keyframe" }
 	rows[#rows + 1] = { keys = { "LB" }, text = "Trim, keyframes" }
-	rows[#rows + 1] = { keys = { "START" }, text = "Menu" }
+	rows[#rows + 1] = { keys = { "START" }, text = "Save/Export" }
 	rows[#rows + 1] = { keys = { "B" }, text = "Back" }
 	return rows
 end

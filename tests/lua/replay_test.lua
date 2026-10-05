@@ -119,8 +119,12 @@ lbPress(R.PAD.Y)
 check("LB + Y deletes the nearest keyframe", #R.on.edit.keys == 2 and math.abs(R.on.edit.keys[2].t - 1.3) < 1e-6)
 R.SetKey(R.on.edit.keys, chaseFar, 1.0)
 R.on.t = 0.6
+R.on.manual = R.CopyCam(chaseFar)
 press(R.PAD.LEFT)
-check("scrubbing with keyframes: the keyed camera, not a leftover change", R.on.manual == nil)
+check("scrubbing keeps the camera I'm setting up (it isn't reset to the keyframes)", R.on.manual ~= nil and R.on.manual.dist == chaseFar.dist)
+R.on.manual = nil
+press(R.PAD.LEFT)
+check("... and with no change of mine, scrubbing shows the keyed camera", R.on.manual == nil)
 api.pad = { buttons = 0, rx = 1 } Think(2.5, 0.1) api.pad = { buttons = 0 } Think(2.51, 0)
 check("a stick turns the camera here: changed, not keyed until Y", R.on.manual ~= nil and #R.on.edit.keys == 3)
 
@@ -186,6 +190,23 @@ press(R.PAD.X)
 check("... X opens the videos folder", opened == "videos" and R.done ~= nil)
 press(R.PAD.A)
 check("... A closes it", R.done == nil and R.on ~= nil)
+
+local muxed
+local keepSkategm = skategm
+skategm = { MuxWebm = function(a, b, c, off) muxed = { a, b, c, off } return true end, OpenFolder = function() return true end }
+local writers = {}
+local record = video.Record
+video.Record = function(cfg) local w = record(cfg) writers[#writers + 1] = w return w end
+check("export with sound: first the picture, smooth (locked frame rate, no sound)", R.Export(30, 1, true) and writers[1].cfg.lockfps == true and not writers[1].sound and writers[1].cfg.name:find("_picture$"))
+steps = 0
+while R.exporting and steps < 4000 do Think(20 + steps * 0.02, 0.02) capture() steps = steps + 1 end
+local base = writers[1].cfg.name:gsub("_picture$", "")
+check("... then the sound in real time (small picture, audio on)", writers[2] and writers[2].cfg.lockfps == false and writers[2].sound == true and writers[2].cfg.width == 320 and writers[2].cfg.name == base .. "_sound")
+check("... the sound pass carries real frame times and ends at the trim end", writers[2].done and math.abs(writers[2].dt - 0.02) < 1e-9 and math.abs(writers[2].frames - (math.ceil((tb - ta) / 0.02) + 1)) <= 2)
+check("... then they're merged into one file under the plain name", muxed and muxed[1] == base .. "_picture" and muxed[2] == base .. "_sound" and muxed[3] == base and muxed[4] >= 0 and R.done and R.done.name == base)
+video.Record = record
+skategm = keepSkategm
+press(R.PAD.A)
 
 local function hintTexts() local t = {} for _, h in ipairs(R.Hints()) do t[#t + 1] = h.text end return table.concat(t, "|") end
 check("the stick controls are in the hint bar", hintTexts():find("Zoom", 1, true) ~= nil and hintTexts():find("Shake", 1, true) ~= nil)
@@ -259,7 +280,8 @@ local co = R.EvalCam(ch, clip, 0.5)
 check("... and it's kept out of the ground too", co.z >= floorZ)
 floorZ = -1e9
 local drawn, colourMods = 0, 0
-DrawColorModify = function() colourMods = colourMods + 1 end
+local mods = {}
+DrawColorModify = function(t) colourMods = colourMods + 1 mods[#mods + 1] = t end
 DrawMaterialOverlay = function() drawn = drawn + 1 end
 Material = function(p) return { IsError = function() return false end } end
 cam = cam or {}
@@ -271,6 +293,51 @@ for _, f in ipairs(R.FILTERS) do
 	local ok = pcall(R.DrawFilter, f.id, 1.3, 1600, 900, { date = "2026-10-04 12:00" })
 	okAll = okAll and ok
 end
-check("every filter draws (" .. #R.FILTERS .. ": none, b&w, sepia, old film, VHS, contrast, fisheye)", okAll and colourMods == 5 and drawn == 1)
+check("every filter draws (" .. #R.FILTERS .. ": none, b&w, sepia, old film, VHS, contrast, fisheye)", okAll and colourMods == 7 and drawn == 1)
+mods = {}
+R.DrawFilter("sepia", 0, 1600, 900, {})
+check("sepia: grey first, then tinted warm (not greyed again: unlike black & white)", #mods == 2 and mods[1]["$pp_colour_colour"] == 0
+	and mods[2]["$pp_colour_colour"] == 1 and mods[2]["$pp_colour_addr"] > mods[2]["$pp_colour_addb"])
 check("fisheye widens the view", R.FilterFov("fisheye", 75) > 75 and R.FilterFov("bw", 75) == 75)
 check("handheld shake is the same at the same moment (so exports match)", R.Shake(2.5, 1).p == R.Shake(2.5, 1).p and R.Shake(2.5, 1).p ~= R.Shake(2.7, 1).p)
+
+local rclip = {}
+for i = 0, 20 do rclip[#rclip + 1] = { t = i * 0.05, P = { HIPS = Vector(i, 0, 40) }, rocket = (i >= 5 and i <= 9) or i == 15 or nil } end
+local text = R.Encode(rclip, { map = "m", date = "d" })
+local back = R.Decode(text)
+local same = #back == #rclip
+for i, f in ipairs(back) do same = same and (f.rocket == rclip[i].rocket) end
+check("rocket boosts are saved (as spans) and come back on the same frames", same and select(2, text:gsub("\nrocket ", "")) == 2)
+local flames = {}
+S.RocketFlames = function(P, now, key, quiet) flames[#flames + 1] = { P = P, key = key, quiet = quiet } end
+S.RecentClip = function() return rclip end
+if R.on then R.Close() end
+R.Open(rclip, "rocket")
+api.pad = { buttons = 0 }
+if R.on then
+	R.on.t = 0.3 R.on.playing = false
+	Think(20, 0.016)
+	check("the replay shows the rocket's fire on boosted frames (no sound)", #flames > 0 and flames[#flames].quiet == true)
+	local n = #flames
+	R.on.t = 0.6
+	Think(20.1, 0.016)
+	check("... and not on the others", #flames == n)
+	R.Close()
+else
+	check("replay opens for the rocket test", false)
+end
+
+local function free(t, x, yaw) return { t = t, mode = "free", fov = 75, shake = 0, pos = Vector(x, 0, 100), ang = Angle(0, yaw, 0) } end
+local path = { free(0, 0, 0), free(1, 100, 10), free(2, 200, 20), free(3, 300, 30) }
+local function at(t) return R.KeyedCam(path, t) end
+local speedAt1 = (at(1.05).pos.x - at(0.95).pos.x) / 0.1
+check("free camera through 3+ keyframes flows through the middle ones (no stop)", speedAt1 > 90 and speedAt1 < 110)
+check("... and passes exactly through each keyframe", math.abs(at(1).pos.x - 100) < 1e-6 and math.abs(at(2).pos.x - 200) < 1e-6)
+check("... turning smoothly too (yaw keeps going at a middle key)", (at(2.05).ang.y - at(1.95).ang.y) / 0.1 > 9)
+check("... still easing in at the first and out at the last keyframe", (at(0.05).pos.x - at(0).pos.x) / 0.05 < 20 and (at(3).pos.x - at(2.95).pos.x) / 0.05 < 20)
+local two = { free(0, 0, 0), free(1, 100, 0) }
+local f = 0.25
+check("two keyframes: the same ease in / out as before", math.abs(R.KeyedCam(two, f).pos.x - 100 * f * f * (3 - 2 * f)) < 1e-6)
+local wrap = { free(0, 0, 170), free(1, 100, -170), free(2, 200, -150) }
+local y = R.KeyedCam(wrap, 0.5).ang.y
+check("yaw across 180 takes the short way", math.abs(math.NormalizeAngle(y - 180)) < 15)

@@ -18,9 +18,11 @@ mod engine;
 #[cfg_attr(not(feature = "engine"), allow(dead_code))]
 mod pad;
 mod picker;
+pub mod mux;
 mod lua;
 mod memory;
 pub mod rails;
+pub mod authored;
 pub mod world;
 pub mod scene;
 pub mod cleanup;
@@ -1070,6 +1072,40 @@ unsafe extern "C" fn open_folder(l: State) -> c_int {
     })
 }
 
+unsafe extern "C" fn mux_webm(l: State) -> c_int {
+    guarded(l, |lua| {
+        let names = [lua.string(1).unwrap_or_default(), lua.string(2).unwrap_or_default(), lua.string(3).unwrap_or_default()];
+        let offset = lua.number(4, 0.0);
+        let videos = pad::module_dir()
+            .and_then(|d| d.parent().and_then(|p| p.parent()).map(|g| g.to_path_buf()))
+            .and_then(|g| picker::folder(&g, "videos"));
+        let result = match videos {
+            None => Err("can't find the videos folder".to_string()),
+            Some(_) if !names.iter().all(|n| mux::safe_name(n)) => Err("bad video name".to_string()),
+            Some(dir) => {
+                let file = |n: &str| dir.join(format!("{n}.webm"));
+                mux::mux_files(&file(&names[0]), &file(&names[1]), &file(&names[2]), offset).map(|_| {
+                    for n in &names[..2] {
+                        let _ = std::fs::remove_file(file(n));
+                        let _ = std::fs::remove_file(dir.join(format!("{n}.raw")));
+                    }
+                })
+            }
+        };
+        match result {
+            Ok(()) => {
+                lua.push_bool(true);
+                1
+            }
+            Err(e) => {
+                lua.push_bool(false);
+                lua.push_str(&e);
+                2
+            }
+        }
+    })
+}
+
 unsafe extern "C" fn picked_image(l: State) -> c_int {
     guarded(l, |lua| match picker::take() {
         picker::Picked::Idle => {
@@ -1851,6 +1887,7 @@ pub unsafe extern "C" fn gmod13_open(l: State) -> c_int {
         ("PickImage", pick_image),
         ("PickedImage", picked_image),
         ("OpenFolder", open_folder),
+        ("MuxWebm", mux_webm),
         ("SetFrozen", set_frozen),
         ("CollisionHas", collision_has),
         ("PhyHulls", phy_hulls),

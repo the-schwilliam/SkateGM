@@ -214,6 +214,27 @@ fn raw_lump(bytes: &[u8], index: usize) -> Result<(Vec<u8>, u32), String> {
     Ok((out, version))
 }
 
+fn authored_world(a: crate::authored::Authored, opts: Smoothing) -> World {
+    let n = a.triangles.len();
+    let summary = format!("Skate 3 collision as authored: {} triangles, {} rails", n, a.rails.len());
+    World {
+        base_tris: a.triangles.clone(),
+        base_tags: vec![TAG_BRUSH; n],
+        triangles: a.triangles,
+        tags: vec![TAG_BRUSH; n],
+        rails: a.rails,
+        solid: None,
+        fillet_reach: 16.0,
+        opts,
+        statics: Vec::new(),
+        static_census: Vec::new(),
+        brush_census: Vec::new(),
+        brush_models: std::collections::HashMap::new(),
+        brush_entities: Vec::new(),
+        summary,
+    }
+}
+
 pub fn from_bsp(bytes: &[u8]) -> Result<World, String> {
     from_bsp_with(bytes, 1)
 }
@@ -249,6 +270,9 @@ pub fn from_bsp_with(bytes: &[u8], smooth: u32) -> Result<World, String> {
 pub fn from_bsp_opts(bytes: &[u8], opts: Smoothing) -> Result<World, String> {
     let smooth = opts.terrain;
     let bsp = vbsp::Bsp::read(bytes).map_err(|e| format!("could not read the map: {e}"))?;
+    if let Some(authored) = crate::authored::from_pack(&bsp) {
+        return authored.map(|a| authored_world(a, opts));
+    }
     let leaves = leaves_in_order(bytes)?;
     if leaves.len() != bsp.leaves.len() {
         return Err(format!("leaf count mismatch ({} vs {})", leaves.len(), bsp.leaves.len()));

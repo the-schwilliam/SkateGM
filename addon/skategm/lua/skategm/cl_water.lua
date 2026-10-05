@@ -352,8 +352,9 @@ end
 -- these stay usable
 local KEEP_BINDS = { "skategm_toggle", "messagemode", "messagemode2", "+showscores", "toggleconsole", "cancelselect",
 	"+voicerecord", "+menu", "+menu_context", "jpeg", "screenshot", "gm_showhelp", "gm_showteam", "gm_showspare1", "gm_showspare2" }
-hook.Add("PlayerBindPress", "skategm", function(ply, bind, pressed)
+hook.Add("PlayerBindPress", "skategm", function(ply, bind, pressed, code)
 	if S.phase ~= "on" then return end
+	if S.KeyboardUses and S.KeyboardUses(code) then return true end
 	local b = string.lower(bind)
 	for _, k in ipairs(KEEP_BINDS) do
 		if string.find(b, k, 1, true) then return end

@@ -132,10 +132,20 @@ function MAP.DrawWorld()
 	end
 end
 
+function MAP.Title()
+	local map = game and game.GetMap and game.GetMap() or ""
+	local title = GetGlobal2String and GetGlobal2String("SkateGMTitle", "") or ""
+	if MAP.titleFor ~= map .. "\n" .. title then
+		MAP.titleFor = map .. "\n" .. title
+		MAP.title = title ~= "" and ("Skate 3: " .. title) or "Map"
+	end
+	return MAP.title
+end
+
 function MAP.Paint(w, h)
 	if not MAP.Active() then return end
 	PAD.Fonts()
-	PAD.Text("Map", "skategm_ui_title", w / 2, h * 0.03, WHITE, TEXT_ALIGN_CENTER)
+	PAD.Text(MAP.Title(), "skategm_ui_title", w / 2, h * 0.03, WHITE, TEXT_ALIGN_CENTER)
 	local sub = MAP.target and "A: go to the dot" or "no floor under the dot"
 	if not MAP.CanTeleport() then sub = "you're in a minigame: look, but no teleporting" end
 	PAD.Text(sub, "skategm_ui_sub", w / 2, h * 0.075, MAP.target and WHITE or RED, TEXT_ALIGN_CENTER)

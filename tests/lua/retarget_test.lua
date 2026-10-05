@@ -3,66 +3,74 @@ dofile("../../addon/skategm/lua/autorun/client/skategm_cl.lua")
 local S = SkateGM
 local T = S.test
 
--- fake skeleton (ValveBiped-like): bone -> {parent, world position in a bind/idle pose}
-local names = { "ValveBiped.Bip01_Pelvis", "ValveBiped.Bip01_Spine", "ValveBiped.Bip01_R_Thigh", "ValveBiped.Bip01_R_Calf",
-	"ValveBiped.Bip01_R_Foot", "ValveBiped.Bip01_L_Thigh", "ValveBiped.Bip01_L_Calf", "ValveBiped.Bip01_Spine1" }
-local parent = { [0] = -1, 0, 0, 2, 3, 0, 5, 1 }
--- idle pose facing +x: right is -y
-local pos = { [0] = Vector(0, 0, 40), Vector(0, 0, 44), Vector(0, -4, 38), Vector(0, -4, 20), Vector(0, -4, 3), Vector(0, 4, 38), Vector(0, 4, 20), Vector(0, 0, 50) }
+local names = { [0] = "Pelvis", "Spine", "R_Thigh", "R_Calf", "R_Foot", "L_Thigh", "L_Calf", "L_Foot", "Spine1", "Spine2", "Anim_Attachment_RH" }
+local parent = { [0] = -1, 0, 0, 2, 3, 0, 5, 6, 1, 8, 3 }
+local pos = { [0] = Vector(0, 0, 40), Vector(0, 0, 44), Vector(0, -4, 38), Vector(0, -4, 20), Vector(0, -4, 3), Vector(0, 4, 38), Vector(0, 4, 20), Vector(0, 4, 3),
+	Vector(0, 0, 50), Vector(0, 0, 56), Vector(2, -5, 22) }
+local COUNT = 11
 local W = {}
-for i = 0, 7 do
+math.randomseed(3)
+for i = 0, COUNT - 1 do
 	local m = Matrix()
-	m:SetAngles(Angle(math.random(-30, 30), math.random(-30, 30), math.random(-30, 30))) -- arbitrary bone frames
+	m:SetAngles(Angle(math.random(-30, 30), math.random(-30, 30), math.random(-30, 30)))
 	m:SetTranslation(pos[i])
 	W[i] = m
 end
-local set = {}
+local set, procedural = {}, {}
 local ent = {
+	GetModel = function() return "models/test.mdl" end,
+	GetPos = function() return Vector(0, 0, 0) end,
+	GetAngles = function() return Angle(0, 0, 0) end,
+	GetModelScale = function() return 1 end,
+	GetBoneName = function(_, i) return "ValveBiped.Bip01_" .. names[i] end,
+	BoneHasFlag = function(_, i, f) if f == 4 then return procedural[i] == true end return true end,
+	LookupBone = function(_, n) for i = 0, COUNT - 1 do if "ValveBiped.Bip01_" .. names[i] == n then return i end end end,
 	GetBoneParent = function(_, i) return parent[i] end,
-	GetBoneCount = function() return 8 end,
+	GetBoneCount = function() return COUNT end,
 	GetBoneMatrix = function(_, i) return Matrix(W[i]) end,
 	SetBoneMatrix = function(_, i, m) set[i] = m end,
+	Sk8Rig = {},
 }
-local R = { parent = parent, swing = {} }
-R.pelvis, R.spine, R.rthigh, R.lthigh = 0, 1, 2, 5
-R.swing[2] = { a = "RIGHTUPLEG", b = "RIGHTLEG", child = 3 }
-R.swing[3] = { a = "RIGHTLEG", b = "RIGHTFOOT", child = 4 }
-R.swing[1] = { a = "SPINE", b = "SPINE1", child = 7 }
-ent.Sk8Rig = R
 
--- skate target pose: turned 90 degrees (facing +y, so right is +x), crouched, right knee forward
 local P = {
-	HIPS = Vector(100, 200, 30), SPINE = Vector(100, 201, 35), SPINE1 = Vector(100, 203, 44),
+	HIPS = Vector(100, 200, 30), SPINE = Vector(100, 201, 35), SPINE1 = Vector(100, 203, 44), SPINE3 = Vector(100, 205, 50),
 	RIGHTUPLEG = Vector(104, 200, 28), LEFTUPLEG = Vector(96, 200, 28),
 	RIGHTLEG = Vector(104, 212, 16), RIGHTFOOT = Vector(104, 204, 2),
+	LEFTLEG = Vector(96, 196, 15), LEFTFOOT = Vector(96, 198, 1),
 }
-S.P = P
 ent.Sk8P = P
 T.Retarget(ent)
 
+local function check(label, ok) print(string.format("%-74s %s", label, ok and "OK" or "<-- WRONG")) end
 local function dir(a, b) return (b - a):GetNormalized() end
-local function report(label, got, want)
-	local d = got:Dot(want)
-	print(string.format("%-28s alignment %.4f  %s", label, d, d > 0.999 and "OK" or "<-- WRONG"))
-end
 local g = function(i) return set[i]:GetTranslation() end
-report("pelvis at skate hips", Vector(1, 0, 0) * (1 - math.min(1, (g(0) - P.HIPS):Length())), Vector(1, 0, 0))
-report("hips right axis", dir(g(5), g(2)), dir(P.LEFTUPLEG, P.RIGHTUPLEG))
-report("thigh -> knee", dir(g(2), g(3)), dir(P.RIGHTUPLEG, P.RIGHTLEG))
-report("shin -> ankle", dir(g(3), g(4)), dir(P.RIGHTLEG, P.RIGHTFOOT))
-report("spine -> spine1", dir(g(1), g(7)), dir(P.SPINE, P.SPINE1))
--- bone lengths must be the model's own, not the skater's
-print(string.format("thigh length kept: model %.2f -> posed %.2f", (pos[3] - pos[2]):Length(), (g(3) - g(2)):Length()))
--- unmapped child (left calf) must follow its parent rigidly
-local lw = W[5]:GetInverseTR() * W[6]
-local ln = set[5]:GetInverseTR() * set[6]
-local drift = (lw:GetTranslation() - ln:GetTranslation()):Length()
-print(string.format("unmapped left calf keeps its local offset: drift %.5f %s", drift, drift < 1e-3 and "OK" or "<-- WRONG"))
--- idempotency: run again on the already-posed skeleton
-for i = 0, 7 do W[i] = Matrix(set[i]) end
+check("every bone posed", #set == COUNT - 1 and set[0] ~= nil)
+check("hips right axis follows the skater", dir(g(5), g(2)):Dot(dir(P.LEFTUPLEG, P.RIGHTUPLEG)) > 0.999)
+check("thigh -> knee", dir(g(2), g(3)):Dot(dir(P.RIGHTUPLEG, P.RIGHTLEG)) > 0.999)
+check("shin -> ankle", dir(g(3), g(4)):Dot(dir(P.RIGHTLEG, P.RIGHTFOOT)) > 0.999)
+check("left shin -> ankle", dir(g(6), g(7)):Dot(dir(P.LEFTLEG, P.LEFTFOOT)) > 0.999)
+check("spine -> spine1", dir(g(1), g(8)):Dot(dir(P.SPINE, P.SPINE1)) > 0.999)
+check("bone lengths are the model's own (thigh, shin)", math.abs((g(3) - g(2)):Length() - (pos[3] - pos[2]):Length()) < 1e-3
+	and math.abs((g(4) - g(3)):Length() - (pos[4] - pos[3]):Length()) < 1e-3)
+local scale = ((pos[6] - pos[5]):Length() + (pos[7] - pos[6]):Length()) / (P.LEFTUPLEG:Distance(P.LEFTLEG) + P.LEFTLEG:Distance(P.LEFTFOOT))
+local feet = (g(4) + g(7)) / 2
+check("feet land where the skater's feet are (scaled to the model's legs)", (feet - (P.HIPS + ((P.RIGHTFOOT + P.LEFTFOOT) / 2 - P.HIPS) * scale)):Length() < 1e-3)
+local lw = W[3]:GetInverse() * W[10]
+local ln = set[3]:GetInverse() * set[10]
+check("an unmapped bone follows its parent rigidly", (lw:GetTranslation() - ln:GetTranslation()):Length() < 1e-3)
 local first = {}
-for i = 0, 7 do first[i] = set[i]:GetTranslation() end
+for i = 0, COUNT - 1 do first[i] = g(i) end
+for i = 0, COUNT - 1 do W[i] = Matrix(set[i]) end
 T.Retarget(ent)
 local worst = 0
-for i = 0, 7 do worst = math.max(worst, (set[i]:GetTranslation() - first[i]):Length()) end
-print(string.format("second pass moves bones by at most %.6f units %s", worst, worst < 1e-3 and "OK" or "<-- WRONG"))
+for i = 0, COUNT - 1 do worst = math.max(worst, (g(i) - first[i]):Length()) end
+check("the same pose again gives the same skeleton (bind pose kept from the first frame)", worst < 1e-3)
+
+local before = set[3]:GetInverse() * set[10]
+local stale = Matrix(set[10])
+stale:SetTranslation(stale:GetTranslation() + Vector(40, -30, 5))
+W[10] = stale
+procedural[10] = true
+T.Retarget(ent)
+local after = set[3]:GetInverse() * set[10]
+check("a jiggle bone stays on its parent, whatever its old matrix says (no feedback)", (after:GetTranslation() - before:GetTranslation()):Length() < 1e-3)

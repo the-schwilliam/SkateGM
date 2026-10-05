@@ -196,7 +196,13 @@ end
 ---------------------------------------------------------------------------
 -- entering and leaving
 ---------------------------------------------------------------------------
+function ED.InMinigame()
+	local M = SKATEGM_MODES
+	return M ~= nil and M.Playing ~= nil and M.Playing()
+end
+
 function ED.Allowed()
+	if ED.InMinigame() then return false end
 	local cv = GetConVar and GetConVar("skategm_park_editor")
 	local v = cv and cv:GetInt() or 1
 	if v == 0 then return false end
@@ -273,6 +279,7 @@ function ED.Input(btn, buttons)
 end
 
 function ED.Think(pad, now, dt)
+	if ED.InMinigame() then ED.Exit(true) return end
 	UI.Fly(ED.cam, pad, dt, ED.FLY, ED.LOOK, ED.FAST)
 	ED.UpdateAim()
 	if now - (ED.lastCam or 0) > ED.CAM_RATE then

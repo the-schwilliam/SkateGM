@@ -1,4 +1,4 @@
-for _, f in ipairs({ "sound", "hud", "marker", "water", "why", "trace", "board_model", "settings", "replay", "replay_cam", "replay_fx", "replay_export", "infmap" }) do AddCSLuaFile("skategm/cl_" .. f .. ".lua") end
+for _, f in ipairs({ "sound", "hud", "marker", "water", "why", "trace", "board_model", "settings", "replay", "replay_cam", "replay_fx", "replay_export", "infmap", "keyboard", "presentation", "retarget", "retarget_math", "flickit_hud", "boundary" }) do AddCSLuaFile("skategm/cl_" .. f .. ".lua") end
 -- Server half of SkateGM. The skate simulation runs on the client
 -- (gm_skategm); the server only hides the real player, keeps it following the
 -- skater (so the world around them stays networked), and puts them back on
@@ -118,6 +118,11 @@ net.Receive("skategm_pose", function(len, ply)
 	for i = 1, POSE_VALUES do net.WriteInt(values[i], 16) end
 	net.WriteUInt(state, 8)
 	net.SendOmit(ply)
+end)
+
+hook.Add("EntityKeyValue", "skategm_map_info", function(ent, key, value)
+	if key == "skategm_boundary" then SetGlobal2String("SkateGMBoundary", value)
+	elseif key == "skategm_title" then SetGlobal2String("SkateGMTitle", value) end
 end)
 
 hook.Add("PlayerDisconnected", "skategm", function(ply)

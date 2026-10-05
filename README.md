@@ -15,8 +15,8 @@ own copy.
 
 - **Garry's Mod on the x86-64 branch.** In Steam, right-click Garry's Mod >
   Properties > Betas, and choose **x86-64**.
-- **A controller.** Xbox, PlayStation, Switch Pro and most others work.
-  Skating is controller only.
+- **A controller** works best. Xbox, PlayStation, Switch Pro and most others
+  work. A keyboard works too (see [Keyboard](#keyboard)).
 - **Your own copy of Skate 3 for the Xbox 360**, dumped by you: the disc
   image (`.iso`), or an extracted folder that holds `default.xex`.
 - Windows.
@@ -64,6 +64,29 @@ Skate 3's own controls work as in the game. Hold **LB** to show the extras:
 | LB + RB | Replays |
 | Right stick click (hold) | Rocket board, if it's on in Settings > Board |
 
+### Keyboard
+
+While this works best with a controller, keyboard is supported:
+
+| Key | Action |
+|---|---|
+| W / Space | Push with right foot |
+| Shift | Push with left foot |
+| S | Brake |
+| A / D | Steer left / right |
+| Q / E | Grab with left / right hand |
+| F | Get on / off board |
+| C | Interact |
+| I / K / U / O | D-pad |
+| Arrow keys | Flick-It tricks |
+| Z | Open menu |
+| Enter | Start |
+| R | Respawn |
+| L | Exit free camera mode |
+| Ctrl | Rocket board |
+| W / A / S / D (in the map, park editor, replays) | Move |
+| Backspace (in menus) | Back |
+
 ### Minigames
 
 Host one with LB + D-pad left; others join from the same menu.
@@ -82,11 +105,36 @@ Host one with LB + D-pad left; others join from the same menu.
 Server owners can turn each one off in Settings > Advanced, or with
 `skategm_<mode>_allowed 0`.
 
+### Skate 3 maps
+
+The installer also builds maps from Skate 3's own parks, from your disc, on
+your PC: their geometry, textures and lighting, with the game's own skate
+collision and grind rails inside, so they skate like Skate 3. Nothing from the
+game is downloaded or shared. They show up in the map list as:
+
+| Map | Place |
+|---|---|
+| `sgm_skate3_maloof` | Maloof Money Cup |
+| `sgm_skate3_unibowl` | The bowl in University's stadium |
+| `sgm_skate3_ultramegapark` | University's Super Ultra Mega Park |
+| `sgm_skate3_university` | University's campus |
+| `sgm_skate3_industrial` | Industrial's canal and harbour blocks |
+| `sgm_skate3_quarry` | Industrial's quarry |
+| `sgm_skate3_skateschool` | Skate School |
+| `sgm_skate3_blackbox` | Black Box |
+
+Building them takes a while (10-15 minutes for all of them), so it's off by
+default: tick "Generate maps (slow)" in the installer and choose which ones
+to build. They go in
+`garrysmod/addons/skategm_maps`.
+
 ### Multiplayer
 
 Everyone who wants to skate runs the installer on their own PC. A dedicated
 server only needs the `skategm` add-on folder, from the release zip, in its
-`garrysmod/addons`.
+`garrysmod/addons`. To host a Skate 3 map, also copy
+`garrysmod/addons/skategm_maps` from a PC that built it: every PC builds the
+same file, so players who built the maps can join.
 
 ## What's new
 
@@ -159,6 +207,11 @@ SkateGM builds on others' open work:
 - **duckyinnit** (MIT): UTT, in `exporter/tools/vendor/utt`.
 - **[chasmlol/skate-3-trick-toolkit](https://github.com/chasmlol/skate-3-trick-toolkit)**:
   the animation and skeleton decoders in `exporter/tools/vendor/skate3_anim`.
+
+Thanks also to **[renchdedsex](https://github.com/renchdedsex)** for the
+**Rench Fix**, merged with their permission: better posture on playermodels,
+the skater, board and camera at 60 FPS, the Flick-It HUD, and keyboard and
+mouse support.
 
 Each part's licence is listed in
 [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md).

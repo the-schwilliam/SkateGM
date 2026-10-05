@@ -79,3 +79,21 @@ check("at the time limit the longest tail wins", G.phase == "results" and G.winn
 SNAKE.Command(host, { cmd = "stop" }, t + 200)
 SNAKE.Command(host, { cmd = "stop" }, t + 201)
 check("the host can close it", G.phase == "idle")
+
+-- ground: every surface down the line, the one nearest the arena's own height
+local floors = { 300, 0, -200 }
+MASK_PLAYERSOLID = 1
+local realTrace = util.TraceLine
+util.TraceLine = function(t)
+	for _, h in ipairs(floors) do
+		if t.start.z > h and t.endpos.z <= h then return { Hit = true, HitPos = Vector(t.start.x, t.start.y, h), HitNormal = Vector(0, 0, 1) } end
+	end
+	return { Hit = false }
+end
+local M = SKATEGM_MODES
+check("ground: under a roof, the floor nearest the arena (not the roof)", M.Ground(0, 0, 20) == 0)
+floors = { 180 }
+check("... on a hill above the arena's height, the hill's surface (not buried)", M.Ground(0, 0, 0) == 180)
+floors = {}
+check("... nothing there: the arena's own height", M.Ground(0, 0, 42) == 42)
+util.TraceLine = realTrace

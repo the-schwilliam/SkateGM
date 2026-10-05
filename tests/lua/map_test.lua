@@ -95,3 +95,12 @@ frame(bit.bor(B.LB, B.Y))
 frame(0)
 check("not over another screen (the minigame menu)", not MAP.Active() and UI.IsOpen("minigames"))
 UI.Give("minigames")
+
+local mapName = "gm_construct"
+game = { GetMap = function() return mapName end }
+local globals = {}
+function GetGlobal2String(k, d) return globals[k] or d end
+check("an ordinary map: the screen says Map", MAP.Title() == "Map")
+mapName = "sgm_skate3_maloof"
+globals.SkateGMTitle = "Maloof Money Cup"
+check("a Skate 3 map names its place (from the map's own info entity, via the server)", MAP.Title() == "Skate 3: Maloof Money Cup")

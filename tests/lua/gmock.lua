@@ -151,3 +151,38 @@ AddCSLuaFile = AddCSLuaFile or function() end
 math.Rand = math.Rand or function(a, b) return a + (b - a) * math.random() end
 Lerp = Lerp or function(t, a, b) return a + (b - a) * t end
 TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP, TEXT_ALIGN_BOTTOM = TEXT_ALIGN_LEFT or 0, TEXT_ALIGN_CENTER or 1, TEXT_ALIGN_RIGHT or 2, TEXT_ALIGN_TOP or 3, TEXT_ALIGN_BOTTOM or 4
+do
+	local Mx = getmetatable(Matrix()).__index
+	function Mx:SetField(r, c, v) self[r][c] = v end
+	function Mx:GetField(r, c) return self[r][c] end
+	function Mx:GetForward() return Vector(self[1][1], self[2][1], self[3][1]) end
+	function Mx:GetRight() return Vector(-self[1][2], -self[2][2], -self[3][2]) end
+	function Mx:GetUp() return Vector(self[1][3], self[2][3], self[3][3]) end
+	function Mx:GetInverse()
+		local a = self
+		local det = a[1][1] * (a[2][2] * a[3][3] - a[2][3] * a[3][2]) - a[1][2] * (a[2][1] * a[3][3] - a[2][3] * a[3][1]) + a[1][3] * (a[2][1] * a[3][2] - a[2][2] * a[3][1])
+		if math.abs(det) < 1e-12 then return nil end
+		local o = Matrix()
+		o[1][1] = (a[2][2] * a[3][3] - a[2][3] * a[3][2]) / det
+		o[1][2] = (a[1][3] * a[3][2] - a[1][2] * a[3][3]) / det
+		o[1][3] = (a[1][2] * a[2][3] - a[1][3] * a[2][2]) / det
+		o[2][1] = (a[2][3] * a[3][1] - a[2][1] * a[3][3]) / det
+		o[2][2] = (a[1][1] * a[3][3] - a[1][3] * a[3][1]) / det
+		o[2][3] = (a[1][3] * a[2][1] - a[1][1] * a[2][3]) / det
+		o[3][1] = (a[2][1] * a[3][2] - a[2][2] * a[3][1]) / det
+		o[3][2] = (a[1][2] * a[3][1] - a[1][1] * a[3][2]) / det
+		o[3][3] = (a[1][1] * a[2][2] - a[1][2] * a[2][1]) / det
+		local t = a:GetTranslation()
+		for i = 1, 3 do o[i][4] = -(o[i][1] * t.x + o[i][2] * t.y + o[i][3] * t.z) end
+		return o
+	end
+end
+BONE_USED_BY_ANYTHING = BONE_USED_BY_ANYTHING or 0x7FF00
+GetConVar = GetConVar or function(name)
+	if MOCK_CVARS[name] == nil then return nil end
+	return { GetBool = function() return MOCK_CVARS[name] ~= "0" end, GetInt = function() return tonumber(MOCK_CVARS[name]) or 0 end,
+		GetFloat = function() return tonumber(MOCK_CVARS[name]) or 0 end, GetString = function() return MOCK_CVARS[name] end }
+end
+do local frame = 0 FrameNumber = FrameNumber or function() frame = frame + 1 return frame end end
+LerpVector = LerpVector or function(t, a, b) return a + (b - a) * t end
+LerpAngle = LerpAngle or function(t, a, b) return Angle(a.p + (b.p - a.p) * t, a.y + (b.y - a.y) * t, a.r + (b.r - a.r) * t) end

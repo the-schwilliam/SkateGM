@@ -178,10 +178,32 @@ PAD.WORDS = {
 	nintendo = { LB = "L", RB = "R", LT = "ZL", RT = "ZR", A = "B", B = "A", X = "Y", Y = "X", START = "+" },
 }
 function PAD.T(text)
-	local words = PAD.WORDS[PAD.Style()]
+	local keys = PAD.KeyboardHints()
+	local words = keys and PAD.KEYBOARD_LABELS or PAD.WORDS[PAD.Style()]
 	if not words or type(text) ~= "string" then return text end
-	text = text:gsub("%f[%w]([LR][BT])%f[%W]", function(w) return words[w] end)
-	return (text:gsub("([%+%(] ?)([ABXY])%f[%W]", function(pre, k) return pre .. words[k] end))
+	local function word(k) return keys and PAD.KeyLabel(k) or words[k] end
+	text = text:gsub("%f[%w]([LR][BT])%f[%W]", word)
+	if keys then text = text:gsub("D%-pad (%a+)", function(d) return PAD.KeyLabel(d:upper()) or ("D-pad " .. d) end) end
+	return (text:gsub("([%+%(] ?)([ABXY])%f[%W]", function(pre, k) return pre .. word(k) end))
+end
+PAD.KEYBOARD_LABELS = { A = "Space", B = "S", X = "Shift", Y = "F", LB = "Z", RB = "C", LT = "Q", RT = "E", LS = "WASD", RS = "Arrows",
+	UP = "I", DOWN = "K", LEFT = "U", RIGHT = "O", START = "Enter" }
+function PAD.KeyboardHints()
+	local api = PAD.API()
+	return api and api.KeyboardHints and api.KeyboardHints() or false
+end
+PAD.KEYBOARD_MENU_LABELS = { B = "Backspace", LS = "WASD" }
+function PAD.KeyLabel(name)
+	if PAD.KeyboardHints() then return (UI.open and PAD.KEYBOARD_MENU_LABELS[name]) or PAD.KEYBOARD_LABELS[name] end
+end
+function PAD.GlyphWidth(name, size)
+	local label = PAD.KeyLabel(name)
+	if label then
+		surface.SetFont("skategm_ui_key")
+		return math.max(size, (surface.GetTextSize(label) or 0) + size * 0.5)
+	end
+	local g = PAD.GLYPHS[name]
+	return g and (g[3] and size * 1.6 or size) or 0
 end
 PAD.NAMES = { [B.A] = "A", [B.B] = "B", [B.X] = "X", [B.Y] = "Y", [B.LB] = "LB", [B.RB] = "RB", [B.UP] = "UP", [B.DOWN] = "DOWN", [B.LEFT] = "LEFT", [B.RIGHT] = "RIGHT" }
 PAD.WHITE, PAD.DIM, PAD.GREY, PAD.BLUE = Color(255, 255, 255), Color(120, 120, 120), Color(170, 170, 170), Color(120, 220, 255)
@@ -235,6 +257,13 @@ local function Shape(kind, cx, cy, size, col)
 end
 
 function PAD.Glyph(name, x, y, size)
+	local label = PAD.KeyLabel(name)
+	if label then
+		local wide = PAD.GlyphWidth(name, size)
+		draw.RoundedBox(4, x, y, wide, size, Color(55, 60, 68))
+		draw.SimpleText(label, "skategm_ui_key", x + wide / 2, y + size / 2, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		return wide
+	end
 	local g = PAD.GLYPHS[name]
 	if not g then return 0 end
 	local style = PAD.Style()
@@ -304,10 +333,8 @@ function PAD.Legend(rows, w, h, where)
 	surface.SetFont("skategm_ui_sub")
 	local function width(r)
 		local kw = 0
-		for _, k in ipairs(r.keys) do
-			local g = PAD.GLYPHS[k]
-			kw = kw + ((g and g[3]) and size * 1.6 or size) + 4
-		end
+		for _, k in ipairs(r.keys) do kw = kw + PAD.GlyphWidth(k, size) + 4 end
+		surface.SetFont("skategm_ui_sub")
 		return kw + (r.join and size * 0.6 * (#r.keys - 1) or 0) + 2 + surface.GetTextSize(r.text) + size * 1.2
 	end
 	local lines, line, lineW = {}, {}, 0

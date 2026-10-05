@@ -7,7 +7,16 @@ local Say, WATER = L.Say, L.WATER
 -- accounting, run inside the engine from your game data); only the look is
 -- ours. Drawn on its own panel, so other add-ons' hooks can't block it.
 ---------------------------------------------------------------------------
-local cvHud = CreateClientConVar("skategm_hud", "1", true, false, "Show the score display", 0, 1)
+local cvHud = CreateClientConVar("skategm_hud", "1", true, false, "Show the HUD (all of it)", 0, 1)
+local cvTotal = CreateClientConVar("skategm_hud_total", "1", true, false, "Show the total score", 0, 1)
+local cvLine = CreateClientConVar("skategm_hud_line", "1", true, false, "Show the line score, multiplier and timer", 0, 1)
+local cvTrick = CreateClientConVar("skategm_hud_trick", "1", true, false, "Show trick names", 0, 1)
+local cvCallouts = CreateClientConVar("skategm_hud_callouts", "1", true, false, "Show call-outs (clean, sketchy, marker set...)", 0, 1)
+function S.HudShows(cv)
+	if not cvHud:GetBool() then return false end
+	local c = cv and GetConVar(cv)
+	return not c or c:GetBool()
+end
 local H = { total = 0, line = 0, seq = 0, mult = 1, lineT = 0, lineCap = 1, trick = "", trickT = -10, events = {}, init = false }
 S.H = H
 
@@ -109,16 +118,17 @@ function S.HudPaint(w, h, now)
 		if draw.RoundedBox then draw.RoundedBox(12, (w - bw) / 2, h * 0.42 - bh / 2, bw, bh, Color(0, 0, 0, 170)) end
 		Shadowed("Waiting for collision to load...", "skategm_big", w / 2, h * 0.42 - bh * 0.15, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	end
-	if not cvHud:GetBool() then return end
+	local show = cvHud:GetBool()
 	local white = Color(255, 255, 255)
-	-- session total, top right
-	Shadowed("TOTAL", "skategm_small", w - w * 0.03, h * 0.04, Color(220, 220, 220), TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
-	Shadowed(Commas(H.total), "skategm_mid", w - w * 0.03, h * 0.065, white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+	if show and cvTotal:GetBool() then
+		Shadowed("TOTAL", "skategm_small", w - w * 0.03, h * 0.04, Color(220, 220, 220), TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+		Shadowed(Commas(H.total), "skategm_mid", w - w * 0.03, h * 0.065, white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+	end
 	-- the current line, bottom left: call-outs above the trick name above the
 	-- line score (with its multiplier), its timer bar, the pending sequence
 	local lx, base = w * 0.03, h * 0.78
 	local active = H.line > 0 or H.seq > 0 or H.lineT > 0
-	if active then
+	if active and show and cvLine:GetBool() then
 		local y = base
 		Shadowed(Commas(H.line), "skategm_huge", lx, y, white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 		if H.mult > 1.001 then
@@ -140,7 +150,7 @@ function S.HudPaint(w, h, now)
 	-- trick name, just above the line score, fading out after it was last done
 	local age = now - H.trickT
 	local ty = base - h * 0.035
-	if H.trick ~= "" and age < 2.5 then
+	if H.trick ~= "" and age < 2.5 and show and cvTrick:GetBool() then
 		local a = age < 1.8 and 1 or 1 - (age - 1.8) / 0.7
 		Shadowed(string.upper(H.trick), "skategm_big", lx, ty, white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, a)
 		if H.switch then Shadowed("SWITCH", "skategm_csmall", lx, ty - h * 0.0125, Color(200, 200, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, a) end
@@ -158,7 +168,7 @@ function S.HudPaint(w, h, now)
 		local eage = now - e.t
 		if eage > 1.8 then table.remove(H.events, i) end
 	end
-	for _, e in ipairs(H.events) do
+	for _, e in ipairs((show and cvCallouts:GetBool()) and H.events or {}) do
 		local eage = now - e.t
 		local a = eage < 1.2 and 1 or 1 - (eage - 1.2) / 0.6
 		Shadowed(e.text, e.big and "skategm_big" or "skategm_cmid", lx, ey, e.col, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, a)

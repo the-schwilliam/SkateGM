@@ -124,3 +124,8 @@ local before = #world
 send(admin, "skategm_editor_place", "deck_96x128", Vector(0, 0, 0), 0)
 check("no more parts than the limit", #world == before and admin.said[#admin.said]:find("full", 1, true) ~= nil)
 ED.MAX_PARTS = keep
+
+SKATEGM_MODES = { PlayerInPlay = function(p) return p == amy end }
+send(amy, "skategm_editor_state", true)
+check("the server refuses the editor during the player's minigame", amy.nw.SkateGMEditing ~= true and amy.said[#amy.said]:find("minigame", 1, true) ~= nil)
+SKATEGM_MODES = nil

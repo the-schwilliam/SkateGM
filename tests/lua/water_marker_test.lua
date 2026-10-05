@@ -84,6 +84,18 @@ print("marker display: a D-pad, every action beyond its own arm:", up and down a
 	and left.x < cx - u * 1.5 and left.y == cy and left.ax == TEXT_ALIGN_RIGHT
 	and right.x > cx + u * 1.5 and right.y == cy and right.ax == TEXT_ALIGN_LEFT and "OK" or ("<-- WRONG " .. all))
 print("... with no \"LB +\" on it:", not all:find("LB", 1, true) and "OK" or "<-- WRONG")
+local api = SkateGM.API
+local hadHints = api.KeyboardHints
+api.KeyboardHints = function() return true end
+texts, at = {}, {}
+SKATEGM_MODES = { menu = {} }
+S.MarkerPaint(1920, 1080)
+SKATEGM_MODES = hadModes
+api.KeyboardHints = hadHints
+local ki, kk, ku, ko = at["I"], at["K"], at["U"], at["O"]
+print("keyboard: I / K / U / O written on the D-pad's arms", ki and kk and ku and ko and ki.x == cx and ki.y < cy and kk.x == cx and kk.y > cy
+	and ku.x < cx and ku.y == cy and ko.x > cx and ko.y == cy and "OK" or ("<-- WRONG " .. table.concat(texts, "|")))
+texts, at = {}, {}
 -- the combos list themselves (each screen registers its own, with a label)
 local UI = SKATEGM_UI
 local PB = UI.pad.B
@@ -124,7 +136,8 @@ SKATEGM_MODES = hadModes
 texts = {}
 S.noPad = true
 S.MarkerPaint(1920, 1080)
-print("no controller: says so:", table.concat(texts, "|"):find("Connect a controller", 1, true) and "OK" or "<-- WRONG")
+print("no controller: says so:", table.concat(texts, "|"):find("No controller found", 1, true) and "OK" or "<-- WRONG")
+print("... and how to skate with the keyboard instead:", table.concat(texts, "|"):find("skate with the keyboard", 1, true) and "OK" or "<-- WRONG")
 print("... and that PlayStation and other pads work too:", table.concat(texts, "|"):find("PlayStation", 1, true) and "OK" or "<-- WRONG")
 texts = {}
 S.padName = "none usable (not recognised as a gamepad: Redragon Harrow)"

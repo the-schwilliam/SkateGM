@@ -157,7 +157,7 @@ function C.DrawWorld()
 	render.SetColorMaterial()
 	if st.area then
 		local a = st.area
-		SKATEGM_MODES.Ring(Vector(a[1], a[2], a[3] + 2), a[4], Color(GREEN.r, GREEN.g, GREEN.b, 140 + 80 * math.sin(now * 2)), 64)
+		SKATEGM_MODES.AreaWall(Vector(a[1], a[2], a[3]), a[4], Color(GREEN.r, GREEN.g, GREEN.b))
 	end
 	if st.phase ~= "playing" then return end
 	glow = glow or (Material and Material("sprites/light_glow02_add"))

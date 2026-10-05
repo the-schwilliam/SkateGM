@@ -82,22 +82,46 @@ function R.CopyCam(p)
 	return c
 end
 
-local function Smooth(f) return f * f * (3 - 2 * f) end
-local function LerpYaw(f, a, b) return a + (math.NormalizeAngle(b - a)) * f end
+local ANGLES = { chase = { 3 }, tripod = {}, free = { 6, 7 } }
 
-function R.BlendCam(a, b, f)
-	local c = R.CopyCam(a)
-	c.fov = a.fov + (b.fov - a.fov) * f
-	c.shake = (a.shake or 0) + ((b.shake or 0) - (a.shake or 0)) * f
-	if a.mode == "chase" then
-		c.yaw = LerpYaw(f, a.yaw, b.yaw)
-		c.pitch = a.pitch + (b.pitch - a.pitch) * f
-		c.dist = a.dist + (b.dist - a.dist) * f
+local function Channels(k)
+	local c = { k.fov, k.shake or 0 }
+	if k.mode == "chase" then
+		c[3], c[4], c[5] = k.yaw, k.pitch, k.dist
 	else
-		c.pos = a.pos + (b.pos - a.pos) * f
-		if a.mode == "free" then
-			c.ang = Angle(a.ang.p + math.NormalizeAngle(b.ang.p - a.ang.p) * f, LerpYaw(f, a.ang.y, b.ang.y), 0)
-		end
+		c[3], c[4], c[5] = k.pos.x, k.pos.y, k.pos.z
+		if k.mode == "free" then c[6], c[7] = k.ang.p, k.ang.y end
+	end
+	return c
+end
+
+local function Unwrap(c, ref, mode)
+	for _, a in ipairs(ANGLES[mode]) do c[a] = ref[a] + math.NormalizeAngle(c[a] - ref[a]) end
+	return c
+end
+
+function R.SplineCam(prev, k, n, nxt, f)
+	local ck = Channels(k)
+	local cn = Unwrap(Channels(n), ck, k.mode)
+	local dt = n.t - k.t
+	local f2, f3 = f * f, f * f * f
+	local h00, h10, h01, h11 = 2 * f3 - 3 * f2 + 1, f3 - 2 * f2 + f, -2 * f3 + 3 * f2, f3 - f2
+	local cp = prev and Unwrap(Channels(prev), ck, k.mode)
+	local cx = nxt and Unwrap(Channels(nxt), cn, k.mode)
+	local out = {}
+	for j = 1, #ck do
+		local m0 = cp and (cn[j] - cp[j]) / (n.t - prev.t) or 0
+		local m1 = cx and (cx[j] - ck[j]) / (nxt.t - k.t) or 0
+		out[j] = h00 * ck[j] + h10 * dt * m0 + h01 * cn[j] + h11 * dt * m1
+	end
+	local c = R.CopyCam(k)
+	c.fov = math.Clamp(out[1], R.FOV_MIN, R.FOV_MAX)
+	c.shake = math.max(0, out[2])
+	if k.mode == "chase" then
+		c.yaw, c.pitch, c.dist = math.NormalizeAngle(out[3]), out[4], math.max(1, out[5])
+	else
+		c.pos = Vector(out[3], out[4], out[5])
+		if k.mode == "free" then c.ang = Angle(math.Clamp(out[6], -89, 89), out[7], 0) end
 	end
 	return c
 end
@@ -111,7 +135,10 @@ function R.KeyedCam(keys, t)
 	if i == 0 then return keys[1], 1 end
 	local k, n = keys[i], keys[i + 1]
 	if n and n.mode == k.mode and n.t > k.t then
-		return R.BlendCam(k, n, Smooth(math.Clamp((t - k.t) / (n.t - k.t), 0, 1))), i
+		local prev, nxt = keys[i - 1], keys[i + 2]
+		if not (prev and prev.mode == k.mode and prev.t < k.t) then prev = nil end
+		if not (nxt and nxt.mode == k.mode and nxt.t > n.t) then nxt = nil end
+		return R.SplineCam(prev, k, n, nxt, math.Clamp((t - k.t) / (n.t - k.t), 0, 1)), i
 	end
 	return k, i
 end

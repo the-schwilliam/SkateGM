@@ -265,3 +265,9 @@ calls.teleport = nil
 SkateGM.API.Pad = function() return nil end
 frame(0)
 check("stopping skating closes the editor (without moving the skater)", not ED.active and calls.teleport == nil)
+
+local playing = true
+SKATEGM_MODES.Playing = function() return playing end
+check("no park editor while my minigame is on", ED.Allowed() == false)
+playing = false
+check("... allowed again after it", ED.Allowed() == true)

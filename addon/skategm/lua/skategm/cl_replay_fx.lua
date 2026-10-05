@@ -119,9 +119,11 @@ function R.DrawFilter(id, t, w, h, meta)
 	if id == "bw" then
 		Colour({ colour = 0, contrast = 1.1 })
 	elseif id == "sepia" then
-		Colour({ colour = 0, addr = 0.09, addg = 0.04, addb = -0.04, contrast = 1.05 })
+		Colour({ colour = 0, contrast = 1.05 })
+		Colour({ addr = 0.12, addg = 0.05, addb = -0.07 })
 	elseif id == "film" then
-		Colour({ colour = 0.15, addr = 0.06, addg = 0.03, addb = -0.03, contrast = 1.15, brightness = -0.02 })
+		Colour({ colour = 0.15, contrast = 1.15, brightness = -0.02 })
+		Colour({ addr = 0.06, addg = 0.03, addb = -0.03 })
 	elseif id == "vhs" then
 		Colour({ colour = 1.35, contrast = 1.08, addb = 0.02 })
 	elseif id == "contrast" then
