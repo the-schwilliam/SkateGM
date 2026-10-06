@@ -1,5 +1,9 @@
 # Changelog
 
+## 7.01
+
+- Fixed playermodels drifting away from the skater when the board rolls away after a bail
+
 ## 7.0
 
 - **Skate 3 maps**! Turn on the `Generate maps (slow)` in the installer and pick the ones you want. It builds Skate 3's own areas into Garry's Mod maps from your disc with their textures, lighting, sky, props, and the game's own collision and grind rails, so they skate like Skate 3. 

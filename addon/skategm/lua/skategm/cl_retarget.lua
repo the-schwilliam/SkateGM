@@ -43,6 +43,14 @@ function M.HeadYaw(ent,P,now)
 	end
 	return ent.Sk8GazeYaw or 0
 end
+M.ON_BOARD,M.OFF_BOARD=30,60
+function M.ScaleOrigin(P)
+	local board,hips=P.SKATEBOARD_ROOT,P.HIPS
+	if not board or not hips then return board or hips end
+	local feet=(P.LEFTFOOT and P.RIGHTFOOT) and (P.LEFTFOOT+P.RIGHTFOOT)/2 or hips
+	local w=math.Clamp((M.OFF_BOARD-feet:Distance(board))/(M.OFF_BOARD-M.ON_BOARD),0,1)
+	return hips+(board-hips)*w
+end
 M.MIN_LINK=0.5
 function M.LinkFor(id,links,base)
 	local child,seen=links[id],0
@@ -56,7 +64,7 @@ function M.Apply(ent,P)
 	local count=ent:GetBoneCount()
 	local names,points={},{}
 	for name,point in pairs(P or {}) do names[#names+1]=name points[#points+1]=point end
-	local pose={boneNames=names,bones=points,board=P.SKATEBOARD_ROOT or P.HIPS}
+	local pose={boneNames=names,bones=points,board=M.ScaleOrigin(P)}
 	local bind=ent.Sk8Bind
 	if not pose or not pose.boneNames or not bind then return end
 	local joints={}

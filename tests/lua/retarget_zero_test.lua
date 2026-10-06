@@ -40,3 +40,11 @@ for i = 0, COUNT - 1 do worst = math.max(worst, (a[i]:GetTranslation() - b[i]:Ge
 check("spine bones of zero length (Spine1, Spine2 on Spine): the torso doesn't flip with float noise", worst < 0.05)
 local dir = (a[10]:GetTranslation() - a[1]:GetTranslation()):GetNormalized()
 check("... it still leans the way the skater's spine does", dir:Dot((P.SPINE3 - P.SPINE):GetNormalized()) > 0.95)
+local rig = dofile("../../addon/skategm/lua/skategm/cl_retarget.lua")
+local onBoard = { HIPS = Vector(0, 0, 40), LEFTFOOT = Vector(-6, 0, 4), RIGHTFOOT = Vector(6, 0, 4), SKATEBOARD_ROOT = Vector(0, 0, 2) }
+check("riding: the model is fitted around the board (feet stay on the deck)", rig.ScaleOrigin(onBoard):Distance(onBoard.SKATEBOARD_ROOT) < 1e-6)
+local bailed = { HIPS = Vector(0, 0, 10), LEFTFOOT = Vector(-6, 0, 4), RIGHTFOOT = Vector(6, 0, 4), SKATEBOARD_ROOT = Vector(400, 0, 2) }
+check("board rolled away after a bail: fitted around the body instead (no drift)", rig.ScaleOrigin(bailed):Distance(bailed.HIPS) < 1e-6)
+local mid = { HIPS = Vector(0, 0, 40), LEFTFOOT = Vector(0, 0, 4), RIGHTFOOT = Vector(0, 0, 4), SKATEBOARD_ROOT = Vector(45, 0, 4) }
+local o = rig.ScaleOrigin(mid)
+check("... and blended in between (no pop as the board leaves)", o.x > 1 and o.x < 44)
