@@ -27,6 +27,15 @@ pub struct Score {
     pub sketchy: bool,
     pub stance: [bool; 4],
     pub trick: String,
+    pub tricks_named: u32,
+    /// gm_sk8: what Skate 3's own trick display reads (hud/), the raw trick
+    /// label and the display events of every tick since the last pose
+    pub sequence_timer: i32,
+    pub hud_line_capacity: f32,
+    pub trick_label: String,
+    pub new_trick: bool,
+    pub modified_trick: bool,
+    pub close_tricks: bool,
 }
 
 /// Skate 3's session marker, as a display needs it.
@@ -55,6 +64,10 @@ pub struct Pose {
     pub state: String,
     pub score: Score,
     pub marker: Marker,
+    /// Skate 3 audio surface tags: four wheels, then the grind (0 = none)
+    pub audio: [u32; 5],
+    pub christ_air: bool,
+    pub body_flip: bool,
 }
 
 /// Where the input for a step comes from.
@@ -72,6 +85,72 @@ pub static INPUT_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 pub static PAD_NAME: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 pub static PAD_KIND: std::sync::Mutex<&'static str> = std::sync::Mutex::new("xbox");
 pub static MARKER_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Buttons kept from the engine (a minigame uses them: left stick in for items).
+pub static MASKED_BUTTONS: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+/// Rolling friction on a loose board (m/s^2, f32 bits; 0 = the game's own).
+pub static BOARD_FRICTION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn board_friction() -> f32 {
+    f32::from_bits(BOARD_FRICTION.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Seconds in the air before the engine sends you back to a checkpoint (0 = never).
+pub fn set_air_reset(seconds: f32) {
+    let frames = if seconds.is_finite() && seconds > 0.0 { (seconds * 60.0).round() as u32 } else { 0 };
+    #[cfg(feature = "engine")]
+    skate_host::AIR_TELEPORT_FRAMES.store(frames, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(feature = "engine"))]
+    AIR_RESET_FRAMES.store(frames, std::sync::atomic::Ordering::Relaxed);
+}
+#[cfg(not(feature = "engine"))]
+pub static AIR_RESET_FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1800);
+
+/// The skater's style (skategm.SetStyle): natural stance (1 regular, 0
+/// goofy), animation style name, posture profile, D-pad gestures (Up, Down,
+/// Left, Right). Each change bumps the generation; the simulation applies
+/// it before its next step.
+#[derive(Clone)]
+pub struct Style {
+    pub natural: u32,
+    pub style: String,
+    pub posture: u32,
+    pub gestures: [u32; 4],
+}
+pub static STYLE: std::sync::Mutex<(u64, Option<Style>)> = std::sync::Mutex::new((0, None));
+
+pub fn set_style(s: Style) {
+    let mut g = STYLE.lock().unwrap_or_else(|e| e.into_inner());
+    g.0 += 1;
+    g.1 = Some(s);
+}
+
+/// The map's retail grind splines (authored::native_rails), for the engine to
+/// grind on instead of their polylines. A map without them clears the list.
+pub fn set_native_rails(natives: Vec<([f32; 3], [f32; 3], Vec<u8>)>) {
+    #[cfg(feature = "engine")]
+    {
+        *skate_host::bridge::NATIVE_RAILS.lock().unwrap_or_else(|e| e.into_inner()) = natives;
+    }
+    #[cfg(not(feature = "engine"))]
+    let _ = natives;
+}
+
+/// The map's collision triangles with their retail surface and native edges
+/// (authored::native_triangles), for the engine's collision_map.
+pub fn set_native_triangles(tris: Vec<([[f32; 3]; 3], u32, Option<[u8; 3]>, bool)>) {
+    #[cfg(feature = "engine")]
+    skate_host::bridge::set_native_triangles(tris);
+    #[cfg(not(feature = "engine"))]
+    let _ = tris;
+}
+
+/// Skate 3's difficulty (skategm.SetDifficulty): 0 easy, 1 normal, 2 hardcore.
+pub static DIFFICULTY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// A punch asked for (skategm.Punch): ticks to hold Skate 3's shove, taken
+/// by the next step. And a knock-down (skategm.KnockDown): skate-space m/s.
+pub static PUNCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static PUNCH_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static KNOCK: std::sync::Mutex<Option<[f32; 3]>> = std::sync::Mutex::new(None);
 
 pub fn set_camera_shake(on: bool) {
     #[cfg(feature = "engine")]
@@ -79,6 +158,14 @@ pub fn set_camera_shake(on: bool) {
     #[cfg(not(feature = "engine"))]
     CAMERA_SHAKE.store(on, std::sync::atomic::Ordering::Relaxed);
 }
+pub fn set_camera_type(kind: u32) {
+    #[cfg(feature = "engine")]
+    skate_host::CAMERA_TYPE.store(kind, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(feature = "engine"))]
+    CAMERA_TYPE.store(kind, std::sync::atomic::Ordering::Relaxed);
+}
+#[cfg(not(feature = "engine"))]
+pub static CAMERA_TYPE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 #[cfg(not(feature = "engine"))]
 pub static CAMERA_SHAKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -113,6 +200,10 @@ mod real {
         pad_sticks: [[i16; 2]; 2],
         connected: bool,
         pads: crate::pad::Pads,
+        /// the STYLE generation last applied
+        style_gen: u64,
+        /// the DIFFICULTY last applied (the session starts on easy)
+        difficulty: u32,
     }
 
     /// Y gets you off the board. Its in-air version ("AirDismounting") once
@@ -126,10 +217,11 @@ mod real {
     const MARKER_MODIFIER: u16 = 0x0100;
     const MARKER_DPAD: u16 = 0x0003;
     fn marker_mask(buttons: u16) -> u16 {
+        let masked = super::MASKED_BUTTONS.load(std::sync::atomic::Ordering::Relaxed);
         if super::MARKER_BLOCKED.load(std::sync::atomic::Ordering::Relaxed) && buttons & MARKER_MODIFIER != 0 {
-            MARKER_DPAD
+            MARKER_DPAD | masked
         } else {
-            0
+            masked
         }
     }
     fn airborne(state: &str) -> bool {
@@ -148,7 +240,14 @@ mod real {
             clean: v.clean,
             sketchy: v.sketchy,
             stance: v.stance,
+            trick_label: v.trick_name.clone(),
             trick: v.trick_name,
+            tricks_named: v.tricks_named,
+            sequence_timer: v.sequence_timer,
+            hud_line_capacity: v.hud_line_capacity,
+            new_trick: v.new_trick,
+            modified_trick: v.modified_trick,
+            close_tricks: v.close_tricks,
         };
         let (active, can_place, can_return, progress, position) = session.marker();
         let marker = Marker { active, can_place, can_return, progress, position };
@@ -167,7 +266,10 @@ mod real {
             }),
             velocity: p.velocity.to_array(),
             tick: p.tick,
+            audio: p.audio,
             state: p.state,
+            christ_air: p.flags & skate_host::bridge::POSE_CHRIST_AIR != 0,
+            body_flip: p.flags & skate_host::bridge::POSE_BODY_FLIP != 0,
         }
     }
 
@@ -184,11 +286,30 @@ mod real {
                 pad_sticks: [[0, 0], [0, 0]],
                 connected: false,
                 pads: crate::pad::Pads::default(),
+                style_gen: 0,
+                difficulty: 0,
             })
+        }
+
+        fn apply_style(&mut self) {
+            let d = super::DIFFICULTY.load(std::sync::atomic::Ordering::Relaxed);
+            if d != self.difficulty {
+                self.difficulty = d;
+                self.session.set_difficulty(d);
+            }
+            let g = super::STYLE.lock().unwrap_or_else(|e| e.into_inner());
+            if g.0 == self.style_gen {
+                return;
+            }
+            self.style_gen = g.0;
+            if let Some(s) = &g.1 {
+                self.session.set_style(s.natural, &s.style, s.posture, s.gestures);
+            }
         }
 
         pub fn activate(&mut self, spawn: [f32; 3], heading: f32) -> Result<Pose, String> {
             self.accumulated = 0.0;
+            self.apply_style();
             self.session.activate(spawn, heading).map(|p| convert(p, &self.session))
         }
 
@@ -209,6 +330,10 @@ mod real {
         /// Add velocity (skate space, m/s): a testing boost. False if not riding.
         pub fn push(&mut self, dv: [f32; 3]) -> bool {
             self.session.push(dv)
+        }
+
+        pub fn force_wipeout(&mut self) {
+            self.session.force_wipeout()
         }
 
         /// Move the board and skater by `d` (skate space), rotated about
@@ -289,6 +414,16 @@ mod real {
         /// Advance by `dt` seconds of real time at the simulation's own rate.
         /// Returns the newest pose (if any tick ran) and the number of ticks.
         pub fn step(&mut self, dt: f32, input: Input) -> Result<(Option<Pose>, u32), String> {
+            self.apply_style();
+            let punch = super::PUNCH.swap(0, std::sync::atomic::Ordering::Relaxed);
+            if punch > 0 {
+                let ok = self.session.shove(punch);
+                super::PUNCH_OK.store(ok, std::sync::atomic::Ordering::Relaxed);
+            }
+            let knock = super::KNOCK.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some(v) = knock {
+                self.session.knock_down(v);
+            }
             let pad = match input {
                 Input::Controller => {
                     let mut frame = self.read_pad();
@@ -326,6 +461,9 @@ mod real {
             // same cap as the mashup: never try to catch up more than 150 ms
             self.accumulated = (self.accumulated + dt).min(0.15);
             let mut ticks = 0;
+            self.session.set_loose_board_friction(super::board_friction());
+            // (the trick display's events of every tick, not just the last)
+            let mut events = [false; 3];
             while self.accumulated >= self.session.period() {
                 self.accumulated -= self.session.period();
                 match pad {
@@ -338,9 +476,16 @@ mod real {
                     })?,
                 }
                 ticks += 1;
+                let v = self.session.scoring();
+                events[0] |= v.new_trick;
+                events[1] |= v.modified_trick;
+                events[2] |= v.close_tricks;
             }
             if ticks > 0 {
-                let pose = convert(self.session.pose(), &self.session);
+                let mut pose = convert(self.session.pose(), &self.session);
+                pose.score.new_trick = events[0];
+                pose.score.modified_trick = events[1];
+                pose.score.close_tricks = events[2];
                 self.last_state = pose.state.clone();
                 return Ok((Some(pose), ticks));
             }
@@ -416,6 +561,10 @@ mod real {
 
         /// (stand-in) carried: nothing to move
         pub fn carry(&mut self, _d: [f32; 3], _pivot: [f32; 3], _m: [[f32; 3]; 3]) {}
+
+        pub fn force_wipeout(&mut self) {
+            self.speed = 0.0;
+        }
 
         /// (stand-in) a boost moves it along
         pub fn push(&mut self, dv: [f32; 3]) -> bool {
@@ -524,6 +673,9 @@ mod real {
                 state: if self.speed > 0.1 { "Riding (stand-in)".into() } else { "Idle (stand-in)".into() },
                 score: Score { multiplier: 1.0, ..Score::default() },
                 marker: Marker { position: (self.checkpoint_returns > 0).then_some(self.spawn), ..Marker::default() },
+                audio: [0; 5],
+                christ_air: false,
+                body_flip: false,
             }
         }
     }

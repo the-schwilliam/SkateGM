@@ -15,7 +15,7 @@
 --   results   the winner, then back to the lobby
 ROYALE = ROYALE or {}
 
-ROYALE.mode = SKATEGM_MODES.Register({ id = "royale", title = "Run Royale", order = 6, color = Color(255, 200, 70) })
+ROYALE.mode = SKATEGM_MODES.Register({ id = "royale", category = "Party", title = "Run Royale", order = 6, color = Color(255, 200, 70) })
 ROYALE.NET_STATE = ROYALE.mode.NET_STATE
 ROYALE.NET_CMD = ROYALE.mode.NET_CMD
 

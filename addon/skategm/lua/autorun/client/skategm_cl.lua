@@ -92,9 +92,14 @@ local cvCamShake = CreateClientConVar("skategm_camera_shake", "0", true, false,
 -- skater) and its field of view (0 = Skate's own)
 local cvCamDist = CreateClientConVar("skategm_camera_distance", "1", true, false, "How far the camera sits from the skater (1 = Skate's own)", 0.5, 2)
 local cvCamFov = CreateClientConVar("skategm_camera_fov", "0", true, false, "Camera field of view in degrees (0 = Skate's own)", 0, 120)
-local function ApplyCameraShake() if skategm and skategm.SetCameraShake then skategm.SetCameraShake(cvCamShake:GetBool() and 1 or 0) end end
+local cvCamType = CreateClientConVar("skategm_camera_type", "1", true, false, "Skate 3's camera: 0 = low, 1 = high", 0, 1)
+local function ApplyCameraShake()
+	if skategm and skategm.SetCameraShake then skategm.SetCameraShake(cvCamShake:GetBool() and 1 or 0) end
+	if skategm and skategm.SetCameraType then skategm.SetCameraType(cvCamType:GetInt()) end
+end
 if cvars and cvars.AddChangeCallback then
 	cvars.AddChangeCallback("skategm_camera_shake", ApplyCameraShake, "skategm_shake")
+	cvars.AddChangeCallback("skategm_camera_type", ApplyCameraShake, "skategm_camtype")
 end
 local TUNING = {
 	[0] = { SK8_CURVE_CAP = "16", SK8_TAPER = "linear", SK8_OFF = "crossings,bigterrain,shortsteps" },
@@ -307,7 +312,7 @@ local function Activate()
 	local pos = ply:GetPos()
 	skategm.Activate(pos.x, pos.y, pos.z, ply:EyeAngles().y)
 	S.phase = "on"
-	S.frozen = nil
+	if skategm.SetFrozen then skategm.SetFrozen(S.frozen and 1 or 0) end
 	SendState(true)
 end
 
@@ -340,6 +345,7 @@ local function TurnOff()
 	if skategm and skategm.SetInputBlocked then skategm.SetInputBlocked(0) end
 	if skategm and skategm.SetMarkerBlocked then skategm.SetMarkerBlocked(0) end
 	S.frozen, S.inputBlocked, S.viewOverride, S.timeScale, S.inputBlockSent, S.lastMoversSig, S.markerBlockSent = nil, nil, nil, nil, nil, nil, nil
+	S.freezeWhy, S.blockWhy, S.views, S.hideOthersWhy, S.noCollideWhy, S.hideOthers, S.noPlayerCollision = {}, {}, {}, {}, {}, nil, nil
 	if S.phase == "on" then
 		local pos = S.pose and S.pose.pos and V(S.pose.pos) or LocalPlayer():GetPos()
 		SendState(false, pos, Heading())
@@ -994,7 +1000,7 @@ function PlayerBlocks(centre, list, sig)
 	local me = LocalPlayer()
 	local now = RealTime()
 	for _, ply in ipairs(player.GetAll()) do
-		if ply ~= me and ply:Alive() and not S.IsHidden(ply) then
+		if ply ~= me and ply:Alive() and not S.IsHidden(ply) and not S.Separation(ply) then
 			local pos
 			local r = S.remote[ply]
 			if r and now - r.last < 0.5 then
@@ -1093,16 +1099,19 @@ end)
 -- whoever skated it): id -> { key, clip, start, index }
 S.clips = S.clips or {}
 
-function S.ClipProxy(ply)
+-- plain: everyone the same (one playermodel, its own colours, the default
+-- board with nothing on it), so only the skating gives a run away
+S.PLAIN_MODEL = "models/player/group01/male_07.mdl"
+function S.ClipProxy(ply, plain)
 	local g = { ghost = true, noCollide = true, of = ply }
 	function g:IsValid() return IsValid(ply) end
-	function g:GetModel() return ply:GetModel() end
-	function g:GetPlayerColor() return ply:GetPlayerColor() end
-	function g:GetSkin() return ply:GetSkin() end
-	function g:GetNumBodyGroups() return ply:GetNumBodyGroups() end
-	function g:GetBodygroup(i) return ply:GetBodygroup(i) end
-	function g:GetNW2String(k, d) return ply:GetNW2String(k, d) end
-	function g:Nick() return ply:Nick() end
+	function g:GetModel() return plain and S.PLAIN_MODEL or ply:GetModel() end
+	function g:GetPlayerColor() return plain and Vector(0.6, 0.6, 0.6) or ply:GetPlayerColor() end
+	function g:GetSkin() return plain and 0 or ply:GetSkin() end
+	function g:GetNumBodyGroups() return plain and 0 or ply:GetNumBodyGroups() end
+	function g:GetBodygroup(i) return plain and 0 or ply:GetBodygroup(i) end
+	function g:GetNW2String(k, d) if plain then return d end return ply:GetNW2String(k, d) end
+	function g:Nick() return plain and "?" or ply:Nick() end
 	return g
 end
 
@@ -1122,10 +1131,13 @@ function S.StopClip(id)
 	S.ForgetSkater(c.key)
 end
 
-function S.PlayClip(id, ply, clip, now)
+function S.PlayClip(id, ply, clip, now, opts)
 	S.StopClip(id)
 	if not (IsValid(ply) and clip and #clip > 0) then return nil end
-	local c = { key = S.ClipProxy(ply), clip = clip, start = now or RealTime(), index = 1 }
+	local plain = opts and opts.plain or false
+	local c = { key = S.ClipProxy(ply, plain), clip = clip, start = now or RealTime(), index = 1, plain = plain }
+	c.key.alpha = opts and tonumber(opts.alpha) or nil
+	c.key.nametag = opts and type(opts.nametag) == "string" and opts.nametag or nil
 	S.clips[id] = c
 	return c.key
 end
@@ -1145,7 +1157,7 @@ function S.ClipsThink(now)
 			c.index = c.index + 1
 		end
 		local r = S.remote[c.key]
-		if c.rocket and r and r.snaps[#r.snaps] then pcall(S.RocketFlames, r.snaps[#r.snaps].P, now, c.key, true) end
+		if c.rocket and not c.plain and r and r.snaps[#r.snaps] then pcall(S.RocketFlames, r.snaps[#r.snaps].P, now, c.key, true) end
 		if c.index > #clip and elapsed > clip[#clip].t - clip[1].t + 1 then S.StopClip(id) end
 	end
 end
@@ -1176,6 +1188,7 @@ include("skategm/cl_sound.lua")
 local cvSounds, cvVolume = S.L.cvSounds, S.L.cvVolume
 S.L.Say, S.L.WATER = Say, WATER
 include("skategm/cl_hud.lua")
+include("skategm/cl_hud_original.lua") -- Skate 3's own trick display (gm_sk8 addition)
 local EnsureHud, H, Shadowed, cvHud = S.L.EnsureHud, S.L.H, S.L.Shadowed, S.L.cvHud
 S.L.H, S.L.Shadowed, S.L.cvSounds = H, Shadowed, cvSounds
 include("skategm/cl_marker.lua")
@@ -1192,7 +1205,10 @@ include("skategm/cl_why.lua")
 --   Interact on foot: RB off the board uses what the skater faces, as E would.
 ---------------------------------------------------------------------------
 local cvRocket = CreateClientConVar("skategm_rocket", "0", true, false, "Rocket board: a rocket on the tail; hold the right stick in to fire it", 0, 1)
+local cvRocketFuel = CreateClientConVar("skategm_rocket_fuel", "0", true, false, "Rocket board fuel: 0 = infinite, 1 / 3 / 5 = seconds of thrust, refilling when not in use", 0, 5)
 local BTN_RS = 0x0080
+S.ROCKET_REFILL = 2.5 -- seconds from empty to full
+S.ROCKET_REFILL_DELAY = 0.4 -- seconds after letting go before it refills
 local cvRBUse = CreateClientConVar("skategm_rb_use", "1", true, false, "RB while off the board uses what the skater faces (doors, buttons)", 0, 1)
 local cvUnfocused = CreateClientConVar("skategm_input_unfocused", "0", true, false, "1 = the controller still skates while the game window isn't in front (0: only the window you're in, so two copies of the game on one PC don't both skate)", 0, 1)
 
@@ -1320,16 +1336,66 @@ function S.RocketFlames(P, now, key, quiet)
 	if not quiet and cvSounds:GetBool() then S.RocketLoop(key, now) end
 end
 
+-- the thrust goes the way the thruster points: along the board, nose up, nose
+-- down, mid-grab - on the ground and in the air (the engine bends its planned
+-- jump for the push: push_selection; a push up or down there was measured:
+-- harness/airrocket.lua z / xz, no recoveries)
+function S.RocketDirection(fwd, state)
+	if not fwd or fwd:LengthSqr() < 1e-6 then return nil end
+	return fwd:GetNormalized()
+end
+
+-- while lit, the state is sent again every ROCKET_HEARTBEAT seconds; another
+-- skater's flames go out ROCKET_STALE seconds after the last word from them
+S.ROCKET_HEARTBEAT, S.ROCKET_STALE = 0.5, 1.5
+
+-- seconds of rocket fuel I have (nil: infinite): the game's rule, else my own setting
+function S.RocketFuelCap(ply)
+	local M = SKATEGM_MODES
+	if M and M.RocketFuel then
+		local rule = M.RocketFuel(ply)
+		if rule ~= false then return rule end
+	end
+	local f = cvRocketFuel:GetInt()
+	return (f == 1 or f == 3 or f == 5) and f or nil
+end
+
+-- metered: firing burns fuel; empty, it cuts out until the stick is let go;
+-- refills (after a moment) while not firing
+function S.RocketFuelThink(on, held, now, dt)
+	local cap = S.RocketFuelCap(LocalPlayer())
+	S.fuelCap = cap
+	if not cap then
+		S.fuel, S.fuelLocked = nil, nil
+		return on
+	end
+	S.fuel = math.min(S.fuel or cap, cap)
+	if not held then S.fuelLocked = nil end
+	if S.fuelLocked then on = false end
+	if on then
+		S.fuel, S.fuelUsedAt = S.fuel - dt, now
+		if S.fuel <= 0 then
+			S.fuel, S.fuelLocked, on = 0, true, false
+			if cvSounds:GetBool() and surface and surface.PlaySound then surface.PlaySound("buttons/button10.wav") end
+		end
+	elseif now - (S.fuelUsedAt or -100) > S.ROCKET_REFILL_DELAY then
+		S.fuel = math.min(cap, S.fuel + dt * cap / S.ROCKET_REFILL)
+	end
+	return on
+end
+
 function S.RocketThink(p, now, dt)
-	local on = cvRocket:GetBool() and S.phase == "on" and p ~= nil
-		and bit.band(bit.bor(p.padButtons or 0, S.keyboardButtons or 0), BTN_RS) ~= 0 and OnBoard(p.state)
-	on = on and true or false
+	local forced = S.RocketForced(LocalPlayer())
+	local held = forced or (p ~= nil and bit.band(bit.bor(p.padButtons or 0, S.keyboardButtons or 0), BTN_RS) ~= 0)
+	local on = (cvRocket:GetBool() or S.RocketOn(LocalPlayer())) and S.RocketAllowed(LocalPlayer()) and S.phase == "on" and p ~= nil and not S.frozen
+		and held and OnBoard(p.state)
+	on = S.RocketFuelThink(on and true or false, held, now, dt)
 	if not on and not S.rocketOn then return end
 	local pos, fwd = Tail(S.P)
-	if on ~= (S.rocketOn or false) then
-		S.rocketOn = on
+	if on ~= (S.rocketOn or false) or (on and now - (S.rocketSentAt or 0) > S.ROCKET_HEARTBEAT) then
+		if on ~= (S.rocketOn or false) and on and pos and cvSounds:GetBool() then sound.Play("weapons/rpg/rocketfire1.wav", pos, 80, 100, cvVolume:GetFloat()) end
+		S.rocketOn, S.rocketSentAt = on, now
 		net.Start("skategm_rocket") net.WriteBool(on) net.SendToServer()
-		if on and pos and cvSounds:GetBool() then sound.Play("weapons/rpg/rocketfire1.wav", pos, 80, 100, cvVolume:GetFloat()) end
 	end
 	if not on or not fwd then return end
 	local scale = S.loadedScale or 1
@@ -1340,7 +1406,8 @@ function S.RocketThink(p, now, dt)
 	if limit > 0 then top = math.min(top, limit) end
 	if speed < top then
 		local dv = math.min(ROCKET_ACCEL * dt, top - speed) / (0.0254 * scale)
-		skategm.Push(fwd.x * dv, fwd.y * dv, fwd.z * dv)
+		local dir = S.RocketDirection(fwd, p.state)
+		if dir then skategm.Push(dir.x * dv, dir.y * dv, dir.z * dv) end
 	end
 	local me = models[LocalPlayer()]
 	S.RocketFlames(IsValid(me) and me.Sk8P or S.P, now, LocalPlayer():EntIndex())
@@ -1349,6 +1416,31 @@ end
 -- which way the skater faces, from its shoulders (flat). (The engine's bones
 -- are RIGHTSHOULDER / LEFTSHOULDER - no underscore; with one this was always
 -- nil and RB never did anything.)
+-- the trick the engine named in this air (nil until it names one, and again
+-- once the skater's back on the ground): its tricksNamed counter moves on
+-- each naming, so a second Christ Air in a row counts too
+function S.AirTrickThink(p, now)
+	local sc = p.score
+	local air = type(p.state) == "string" and p.state:find("Air", 1, true) ~= nil and not p.state:find("Biped", 1, true)
+	if not air then
+		S.airTrick = nil
+	elseif sc and sc.tricksNamed and S.lastTricksNamed ~= nil and sc.tricksNamed ~= S.lastTricksNamed then
+		S.airTrick = { name = tostring(sc.trick or ""), at = now }
+	end
+	S.lastTricksNamed = sc and sc.tricksNamed or S.lastTricksNamed
+end
+
+-- the Christ Air itself: in the pose, and named so by the engine. LT + B and
+-- RT + B both make the pose; which one is the Christ Air (the other is a No
+-- Foot Air) depends on the skater's stance, so the name decides
+-- (harness/christ.lua: ID_TRICK_GRAB_CHRIST_AIR / ID_TRICK_GRAB_NO_FOOT_AIR)
+function S.ChristAir()
+	local p = S.phase == "on" and S.pose
+	if not (p and p.christAir == true and S.airTrick) then return false end
+	local name = S.airTrick.name:lower():gsub("[%s_]", "")
+	return name:find("christair", 1, true) ~= nil
+end
+
 function S.Facing(P)
 	if not (P and P.RIGHTSHOULDER and P.LEFTSHOULDER) then return nil end
 	local right = P.RIGHTSHOULDER - P.LEFTSHOULDER
@@ -1383,8 +1475,8 @@ hook.Add("Think", "skategm_controller", function()
 	end
 	S.RocketLoopsThink(now)
 	-- other skaters' rockets
-	for ply, on in pairs(S.rocketRemote) do
-		if not IsValid(ply) or not on then S.rocketRemote[ply] = nil
+	for ply, at in pairs(S.rocketRemote) do
+		if not IsValid(ply) or now - at > S.ROCKET_STALE then S.rocketRemote[ply] = nil
 		else
 			local r = S.remote[ply]
 			local m = models[ply]
@@ -1393,9 +1485,37 @@ hook.Add("Think", "skategm_controller", function()
 		end
 	end
 end)
+-- the fuel gauge, bottom right, while the rocket is metered
+function S.RocketGaugeShown()
+	return S.phase == "on" and S.fuelCap ~= nil and S.fuel ~= nil and (cvRocket:GetBool() or S.RocketOn(LocalPlayer())) and S.RocketAllowed(LocalPlayer())
+end
+
+function S.PaintRocketGauge(w, h, now)
+	if not S.RocketGaugeShown() then return end
+	local M = SKATEGM_MODES
+	if M and M.HudHidden and M.HudHidden() then return end
+	local k = math.Clamp(S.fuel / S.fuelCap, 0, 1)
+	local bw, bh = math.floor(w * 0.14), math.max(10, math.floor(h * 0.014))
+	local right, bottom = w - math.floor(w * 0.025), h - math.floor(h * 0.05)
+	local F = S.flickit
+	if F and F.Visible and F.Place and F.Visible(S) then
+		local cx, cy, r = F.Place(w, h)
+		right, bottom = cx - r - 24, cy + r
+	end
+	local x, y = right - bw, bottom - bh
+	local empty = S.fuelLocked
+	local a = (k >= 1 and not empty) and 140 or 230
+	draw.RoundedBox(4, x - 3, y - 3, bw + 6, bh + 6, Color(0, 0, 0, a * 0.6))
+	local col = empty and Color(235, 85, 95, a) or Color(255, 150, 50, a)
+	if k > 0 then draw.RoundedBox(3, x, y, math.max(4, bw * k), bh, col) end
+	local label = empty and "ROCKET EMPTY" or string.format("ROCKET  %.1f s", S.fuel)
+	draw.SimpleTextOutlined(label, "DermaDefaultBold", x + bw, y - 4, Color(255, 255, 255, a), TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, Color(0, 0, 0, a * 0.7))
+end
+hook.Add("HUDPaint", "skategm_rocket_gauge", function() pcall(S.PaintRocketGauge, ScrW(), ScrH(), RealTime()) end)
+
 net.Receive("skategm_rocket", function()
 	local ply, on = net.ReadEntity(), net.ReadBool()
-	if IsValid(ply) then S.rocketRemote[ply] = on or nil end
+	if IsValid(ply) then S.rocketRemote[ply] = on and RealTime() or nil end
 end)
 
 S.L.SOURCE_NAMES, S.L.Say, S.L.cvCreases, S.L.cvSteps = SOURCE_NAMES, Say, cvCreases, cvSteps
@@ -1441,6 +1561,7 @@ hook.Add("Think", "skategm", function()
 	S.engineState = p.state
 
 	S.pose = p
+	S.AirTrickThink(p, RealTime())
 	if p.names and not S.idx then
 		S.idx = {}
 		for i, n in ipairs(p.names) do S.idx[n] = i end
@@ -1572,6 +1693,19 @@ end
 
 S.test = { Retarget = Retarget, Swing = Swing, Basis = Basis, FeedEntities = FeedEntities, sent = sent } -- for offline tests
 
+-- the player's skin, bodygroups and sub-materials (clothes, face) on their skater
+-- (ply can be a ghost's stand-in, S.ClipProxy: its clothes are its player's)
+local function CopyLook(e, ply)
+	e:SetSkin(ply:GetSkin())
+	for i = 0, ply:GetNumBodyGroups() - 1 do e:SetBodygroup(i, ply:GetBodygroup(i)) end
+	local src = ply.GetMaterials and ply or (ply.ghost and ply.of)
+	if not (IsValid(src) and src.GetMaterials and src.GetSubMaterial) then return end
+	for i = 0, #(src:GetMaterials() or {}) - 1 do
+		local sub = src:GetSubMaterial(i) or ""
+		if (e:GetSubMaterial(i) or "") ~= sub then e:SetSubMaterial(i, sub ~= "" and sub or nil) end
+	end
+end
+
 local function Skater(ply)
 	local mdl = ply:GetModel()
 	local e = models[ply]
@@ -1579,8 +1713,7 @@ local function Skater(ply)
 		local now = RealTime()
 		if now >= (e.Sk8LookCheck or 0) then
 			e.Sk8LookCheck = now + 0.5
-			e:SetSkin(ply:GetSkin())
-			for i = 0, ply:GetNumBodyGroups() - 1 do e:SetBodygroup(i, ply:GetBodygroup(i)) end
+			CopyLook(e, ply)
 		end
 		return e
 	end
@@ -1595,8 +1728,7 @@ local function Skater(ply)
 	e.RenderOverride = e.Sk8Render
 	e:SetRenderBounds(Vector(-100, -100, -100), Vector(100, 100, 100))
 	e.GetPlayerColor = function() return IsValid(ply) and ply:GetPlayerColor() or Vector(1, 1, 1) end
-	e:SetSkin(ply:GetSkin())
-	for i = 0, ply:GetNumBodyGroups() - 1 do e:SetBodygroup(i, ply:GetBodygroup(i)) end
+	CopyLook(e, ply)
 	local seq=-1
 	for _,name in ipairs({"reference","ragdoll","idle_all_01"}) do
 		seq=e:LookupSequence(name) if seq>=0 then break end
@@ -1638,11 +1770,14 @@ S.DrawBoard = DrawBoard
 function S.RenderSkater(e)
 	local P = e.Sk8P
 	if not (P and P.HIPS) then return end
+	local alpha = e.Sk8Ply and (e.Sk8Ply.alpha or (e.Sk8Ply ~= S.watched and S.Separation(e.Sk8Ply) == "ghost" and S.GHOST_ALPHA or nil))
+	if not alpha and S.InMenu(e.Sk8Ply) then alpha = S.IN_MENU_ALPHA end
+	if alpha and render.SetBlend then render.SetBlend(alpha) end
 	local ok, err = pcall(function()
 		local pc = e.Sk8Ply and e.Sk8Ply.GetPlayerColor and e.Sk8Ply:GetPlayerColor()
 		local graphic = pc and Color(math.Clamp(pc.x * 255, 30, 255), math.Clamp(pc.y * 255, 30, 255), math.Clamp(pc.z * 255, 30, 255)) or nil
 		local look = BOARD and BOARD.client and IsValid(e.Sk8Ply) and BOARD.client.LookFor(e.Sk8Ply)
-		local rocket = (e.Sk8Ply == LocalPlayer() and cvRocket:GetBool()) or (look and look.rocket) or false
+		local rocket = (((e.Sk8Ply == LocalPlayer() and cvRocket:GetBool()) or (look and look.rocket) or S.RocketOn(e.Sk8Ply)) and S.RocketAllowed(e.Sk8Ply)) or S.RocketForced(e.Sk8Ply) or false
 		local hover = S.HoverWanted(e.Sk8Ply)
 		if not (BOARD and BOARD.client and BOARD.client.Draw(e.Sk8Ply, P, look, graphic, rocket, hover, DrawBoard)) then
 			DrawBoard(P, { graphic = graphic, rocket = rocket, trucks = not hover })
@@ -1658,12 +1793,14 @@ function S.RenderSkater(e)
 				e:SetupBones()
 			end
 			e:DrawModel()
+			hook.Run("SkateGMDrawSkater", e, e.Sk8Ply) -- (accessories worn on the skater)
 		end
 		if cvBones:GetBool() or not e.Sk8Rig then
 			render.SetColorMaterial()
 			for _, v in pairs(P) do render.DrawSphere(v, 1.2, 6, 6, Color(255, 210, 60)) end
 		end
 	end)
+	if alpha and render.SetBlend then render.SetBlend(1) end
 	if e.Sk8Ply == LocalPlayer() then
 		S.drawCount = (S.drawCount or 0) + 1
 		pcall(S.MarkerDraw)
@@ -1698,7 +1835,15 @@ local function Turn(v, axis, deg)
 	return v * c + axis:Cross(v) * s + axis * (axis:Dot(v) * (1 - c))
 end
 
+function S.RocketAllowed(ply) local M = SKATEGM_MODES return not (M and M.RocketAllowed) or M.RocketAllowed(ply) end
+function S.RocketForced(ply) local M = SKATEGM_MODES return M ~= nil and M.RocketForced ~= nil and M.RocketForced(ply) end
+function S.HoverAllowed(ply) local M = SKATEGM_MODES return not (M and M.HoverAllowed) or M.HoverAllowed(ply) end
+function S.RocketOn(ply) local M = SKATEGM_MODES return M ~= nil and M.RocketOn ~= nil and M.RocketOn(ply) end
+function S.HoverOn(ply) local M = SKATEGM_MODES return M ~= nil and M.HoverOn ~= nil and M.HoverOn(ply) end
+
 function S.HoverWanted(ply)
+	if not S.HoverAllowed(ply) then return false end
+	if S.HoverOn(ply) then return true end
 	if ply == LocalPlayer() then
 		local cv = GetConVar and GetConVar("skategm_hoverboard")
 		return cv ~= nil and cv:GetBool()
@@ -1734,6 +1879,22 @@ function S.HoverPose(e, ply, P, state, now)
 	return out
 end
 
+-- the model is only drawn when its bounds are in view: they cover every
+-- point of the pose, so a board rolled far from the body is still drawn
+S.BOUNDS_PAD = 48
+function S.FitBounds(e, P)
+	if not e.SetRenderBoundsWS then return end
+	local h = P.HIPS
+	local x0, y0, z0, x1, y1, z1 = h.x, h.y, h.z, h.x, h.y, h.z
+	for _, v in pairs(P) do
+		if v.x < x0 then x0 = v.x elseif v.x > x1 then x1 = v.x end
+		if v.y < y0 then y0 = v.y elseif v.y > y1 then y1 = v.y end
+		if v.z < z0 then z0 = v.z elseif v.z > z1 then z1 = v.z end
+	end
+	local pad = S.BOUNDS_PAD
+	e:SetRenderBoundsWS(Vector(x0 - pad, y0 - pad, z0 - pad), Vector(x1 + pad, y1 + pad, z1 + pad))
+end
+
 local function Show(ply, P, state, stale)
 	local e = Skater(ply)
 	if not IsValid(e) then return end
@@ -1743,6 +1904,7 @@ local function Show(ply, P, state, stale)
 	e.Sk8P = P
 	e.Sk8State = state
 	e:SetPos(P.HIPS)
+	S.FitBounds(e, P)
 	if S.AfterPlace then S.AfterPlace(e) end
 	e:SetNoDraw(false)
 end
@@ -1758,6 +1920,8 @@ end
 -- or bump into it. Reasons are kept apart (S.SetHidden(reason, on)); the
 -- server carries "any reason" to everyone (NW2Bool SkateGMHidden).
 S.hiddenWhy = S.hiddenWhy or {}
+S.freezeWhy = S.freezeWhy or {}
+S.blockWhy = S.blockWhy or {}
 function S.SetHidden(reason, on)
 	S.hiddenWhy[reason] = on and true or nil
 	local any = next(S.hiddenWhy) ~= nil
@@ -1766,8 +1930,31 @@ function S.SetHidden(reason, on)
 		if net and net.Start then net.Start("skategm_hidden") net.WriteBool(any) net.SendToServer() end
 	end
 end
+-- minigames keep players apart (SKATEGM_MODES.Separation): while I play one,
+-- outsiders are hidden; while I'm not, its players are see-through. Either
+-- way they're not solid to me
+S.GHOST_ALPHA = 0.35
+S.IN_MENU_ALPHA = 0.6
+function S.InMenu(ply)
+	return ply ~= LocalPlayer() and IsValid(ply) and ply.GetNW2Bool ~= nil and ply:GetNW2Bool("SkateGMInMenu", false) or false
+end
+function S.Separation(ply)
+	local M = SKATEGM_MODES
+	if not (M and M.Separation) or type(ply) == "table" and ply.ghost then return nil end
+	return M.Separation(ply)
+end
+
+function S.ShowTopView()
+	local top = S.views and S.views[#S.views]
+	S.viewOverride = top and top.fn or nil
+	S.SetHidden("view", S.viewOverride ~= nil)
+end
+
 function S.IsHidden(ply)
 	if ply == nil or ply == LocalPlayer() then return next(S.hiddenWhy) ~= nil end
+	if ply == S.watched then return false end
+	if S.hideOthers and not (type(ply) == "table" and ply.ghost) then return true end
+	if S.Separation(ply) == "hide" then return true end
 	return IsValid(ply) and ply.GetNW2Bool and ply:GetNW2Bool("SkateGMHidden", false) or false
 end
 
@@ -1871,6 +2058,7 @@ S.L.Native, S.L.Say, S.L.TurnOff = Native, Say, TurnOff
 S.KeyboardUses = keyboard.Uses
 S.DataPath, S.InstalledDataPath = DataPath, InstalledDataPath
 include("skategm/cl_settings.lua")
+include("skategm/cl_nametags.lua")
 include("skategm/cl_replay.lua")
 include("skategm/cl_infmap.lua")
 ---------------------------------------------------------------------------
@@ -1915,31 +2103,70 @@ S.API = {
 	SetHidden = function(reason, on) S.SetHidden(reason, on) end,
 	IsHidden = function(ply) return S.IsHidden(ply) end,
 	Score = function() return (H.total or 0) + (H.line or 0) end,
+	-- the pose as it's drawn this frame (smoothed, the same one the skater's
+	-- model has), so whatever follows a skater moves with them, not jittering
 	PoseOf = function(ply)
-		if ply == LocalPlayer() then return S.phase == "on" and S.P or nil end
+		if ply == LocalPlayer() then return S.phase == "on" and (S.renderP or S.P) or nil end
+		local m = models[ply]
+		if IsValid(m) and m.Sk8P and m.Sk8P.HIPS then return m.Sk8P end
 		local r = S.remote[ply]
 		if r then return (S.RemotePose(r, RealTime())) end
 	end,
 	Say = function(text, bad) Say(text, bad) end,
 	-- a game mode can switch other players' solidity off for a while (a race):
 	-- false = off, nil = back to the player's own setting
-	SetPlayerCollision = function(on) S.noPlayerCollision = (on == false) or nil end,
+	-- why: who's asking (a minigame's id); nobody's solid to me while anyone asks
+	SetPlayerCollision = function(on, why)
+		S.noCollideWhy = S.noCollideWhy or {}
+		S.noCollideWhy[why or "mode"] = (on == false) or nil
+		S.noPlayerCollision = next(S.noCollideWhy) ~= nil or nil
+	end,
 	-- where my skater is (its hips), or nil when not skating
 	SkaterPos = function() return S.phase == "on" and S.P and S.P.HIPS or nil end,
 	State = function() return S.phase == "on" and S.engineState or nil end,
-	Freeze = function(on)
-		S.frozen = on and true or nil
-		if skategm and skategm.SetFrozen then skategm.SetFrozen(on and 1 or 0) end
+	-- why: who's holding it (a menu, a minigame, the spectator...); frozen
+	-- while anyone is, so one letting go doesn't undo another's hold
+	Freeze = function(on, why)
+		S.freezeWhy[why or "mode"] = on and true or nil
+		S.frozen = next(S.freezeWhy) ~= nil or nil
+		if skategm and skategm.SetFrozen then skategm.SetFrozen(S.frozen and 1 or 0) end
 	end,
 	IsFrozen = function() return S.frozen == true end,
+	-- everything held under a name (and name_anything): freezes, input
+	-- blocks, hiding - a minigame's leftovers when it's over
+	ReleaseHolds = function(name)
+		local function mine(why) return why == name or why:sub(1, #name + 1) == name .. "_" end
+		local changed = false
+		for _, t in ipairs({ S.freezeWhy, S.blockWhy }) do
+			for why in pairs(t) do if mine(why) then t[why] = nil changed = true end end
+		end
+		for why in pairs(S.hiddenWhy) do if mine(why) then S.SetHidden(why, false) end end
+		for _, t in ipairs({ S.hideOthersWhy or {}, S.noCollideWhy or {} }) do
+			for why in pairs(t) do if mine(why) then t[why] = nil changed = true end end
+		end
+		S.hideOthers = next(S.hideOthersWhy or {}) ~= nil or nil
+		S.noPlayerCollision = next(S.noCollideWhy or {}) ~= nil or nil
+		for i = #(S.views or {}), 1, -1 do
+			if mine(S.views[i].owner) then table.remove(S.views, i) changed = true end
+		end
+		S.ShowTopView()
+		if changed then
+			S.frozen = next(S.freezeWhy) ~= nil or nil
+			if skategm and skategm.SetFrozen then skategm.SetFrozen(S.frozen and 1 or 0) end
+			S.inputBlocked = next(S.blockWhy) ~= nil or nil
+			S.ApplyInputBlock()
+		end
+		return changed
+	end,
 	SetTimeScale = function(scale) S.timeScale = (scale and scale ~= 1) and math.Clamp(scale, 0.05, 1) or nil end,
 	Tick = function() local p = S.phase == "on" and S.pose return p and p.tick or nil end,
 	ScoreInfo = function()
 		if S.phase ~= "on" then return nil end
 		return { trick = H.trick, trickT = H.trickT, line = H.line or 0, sequence = H.seq or 0, total = H.total or 0, multiplier = H.mult or 1, clean = H.clean }
 	end,
-	BlockInput = function(on)
-		S.inputBlocked = on and true or nil
+	BlockInput = function(on, why)
+		S.blockWhy[why or "mode"] = on and true or nil
+		S.inputBlocked = next(S.blockWhy) ~= nil or nil
 		S.ApplyInputBlock()
 	end,
 	Pad = function()
@@ -1952,7 +2179,36 @@ S.API = {
 	end,
 	-- (a mode taking over my camera means I'm watching someone: my skater,
 	-- standing still meanwhile, is hidden from everyone)
-	SetView = function(fn) S.viewOverride = fn S.SetHidden("view", fn ~= nil) end,
+	-- owner: who's showing it (the spectator, a menu, a minigame's camera).
+	-- The latest one still showing is seen; one handing theirs back (fn nil)
+	-- leaves the others' alone
+	SetView = function(fn, owner)
+		owner = owner or "mode"
+		S.views = S.views or {}
+		for i = #S.views, 1, -1 do if S.views[i].owner == owner then table.remove(S.views, i) end end
+		if fn then S.views[#S.views + 1] = { owner = owner, fn = fn } end
+		S.ShowTopView()
+	end,
+	ViewOwner = function() local top = S.views and S.views[#S.views] return top and top.owner or nil end,
+	SetWatched = function(ply) S.watched = ply end,
+	-- stopped in a menu (free skate): everyone else sees me faded, "(in a menu)" under my name
+	SetInMenu = function(on)
+		on = on and true or false
+		if on == (S.inMenuSent or false) then return end
+		S.inMenuSent = on
+		if net and net.Start then net.Start("skategm_inmenu") net.WriteBool(on) net.SendToServer() end
+	end,
+	HideOthers = function(on, why)
+		S.hideOthersWhy = S.hideOthersWhy or {}
+		S.hideOthersWhy[why or "mode"] = on and true or nil
+		S.hideOthers = next(S.hideOthersWhy) ~= nil or nil
+	end,
+	-- knock my skater off (a minigame item's hit): a real bail, momentum kept
+	Wipeout = function() return S.phase == "on" and skategm ~= nil and skategm.Wipeout ~= nil and skategm.Wipeout() or false end,
+	-- XInput buttons the engine doesn't see (a minigame uses them)
+	SetButtonMask = function(bits) if skategm and skategm.SetButtonMask then skategm.SetButtonMask(bits or 0) end end,
+	-- rolling friction on my board while nobody rides it (map units/s^2, 0 = the game's own)
+	SetBoardFriction = function(v) if skategm and skategm.SetBoardFriction then skategm.SetBoardFriction(v or 0) return true end return false end,
 	Skaters = function()
 		local list, now = {}, RealTime()
 		for ply, r in pairs(S.remote) do
@@ -1966,6 +2222,13 @@ S.API = {
 		local v = S.phase == "on" and S.pose and S.pose.vel
 		return v and Vector(v[1], v[2], v[3]) or nil
 	end,
+	OnBoard = function() return S.phase == "on" and S.pose ~= nil and OnBoard(S.pose.state) end,
+	-- the engine's ChristAir flag is the board-off-the-feet air; a Superman
+	-- (both grabs: harness/christ.lua, announced ID_TRICK_GRAB_SUPERMAN) isn't one
+	ChristAir = function() return S.ChristAir() end,
+	-- in the board-off-the-feet pose (a Christ Air or a No Foot Air, before the engine has named which)
+	ChristPose = function() return S.phase == "on" and S.pose ~= nil and S.pose.christAir == true end,
+	BodyFlip = function() return S.phase == "on" and S.pose ~= nil and S.pose.bodyFlip == true end,
 	Speed = function()
 		local v = S.phase == "on" and S.pose and S.pose.vel
 		return v and math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3]) * 0.0254 * (S.loadedScale or 1) or 0
@@ -1973,7 +2236,7 @@ S.API = {
 	-- add a velocity to my skater (m/s, world axes), riding or in the air
 	-- play a recorded clip ({ { t, P, state }, ... }, as PoseOf gives) as a
 	-- ghost that looks like ply; returns its key (PoseOf(key) follows it)
-	PlayClip = function(id, ply, clip) return S.PlayClip(id, ply, clip, RealTime()) end,
+	PlayClip = function(id, ply, clip, opts) return S.PlayClip(id, ply, clip, RealTime(), opts) end,
 	StopClip = function(id) S.StopClip(id) end,
 	Launch = function(v)
 		if S.phase ~= "on" or not (skategm and skategm.Push) then return false end
@@ -2041,4 +2304,4 @@ function S.SampleRender()
 end
 hook.Add("PreRender","skategm_interpolated_pose",S.SampleRender)
 
-include("skategm/cl_flickit_hud.lua")
+S.flickit = include("skategm/cl_flickit_hud.lua")

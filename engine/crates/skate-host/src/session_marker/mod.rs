@@ -58,6 +58,15 @@ fn update(session:&mut SessionMarker,input:&ControllerInput,physics:&GamePhysics
     let on_board = p.state.category_12 != 500;
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
     let mut transform = skater.animated_skeleton.roots.animation_to_world;
+    if !on_board {
+        // gm_sk8: on foot the animation root's forward points behind the
+        // skater, and a marker set on foot came back facing the wrong way
+        for i in [0, 2] {
+            for k in 0..3 {
+                transform[i][k] = -transform[i][k];
+            }
+        }
+    }
     if on_board {
         for i in 0..3 {
             transform[i][..3].copy_from_slice(&deck.basis.columns[i]);
@@ -71,6 +80,16 @@ fn update(session:&mut SessionMarker,input:&ControllerInput,physics:&GamePhysics
         //82591E30: above .5m/s, project normalized velocity onto world Up.
         //The cross products are deliberately not normalized a second time.
         let velocity = Vec3::from_slice(&p.skateboard.vector_80.map(f32::from_bits)[..3]);
+        // gm_sk8: slower than that the deck's nose decides - riding (or
+        // standing) fakie the nose points back, and the marker came back
+        // facing the wrong way (foot_forward already allows for fakie)
+        if velocity.length_squared() <= 0.25 && skater.animation.stance().0 {
+            for i in [0, 2] {
+                for k in 0..3 {
+                    transform[i][k] = -transform[i][k];
+                }
+            }
+        }
         if velocity.length_squared() > 0.25 {
             let right = Vec3::Y.cross(velocity.normalize());
             let forward = right.cross(Vec3::Y);

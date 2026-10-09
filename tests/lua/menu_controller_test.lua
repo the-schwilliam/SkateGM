@@ -44,6 +44,7 @@ local B = MENU.BUTTONS
 local hosted
 local mode = SKATEGM_MODES.Register({ id = "snakish", title = "Snakish", order = 5 })
 mode:Host({
+	useStart = false,
 	description = "a test",
 	options = {
 		{ key = "area", label = "Play area", type = "region", min = 256, max = 2048, step = 128, default = 512 },
@@ -73,7 +74,10 @@ check("... and the skater gets no input meanwhile", api.blocked == true)
 press(B.A)
 check("Host opens the host list", MENU.Top().title == "Host a minigame")
 local rows = MENU.Top().rows()
-check("every hostable minigame is listed", #rows == 1 and rows[1].label == "Snakish")
+check("every hostable minigame is listed, under its category (none: Other)", #rows == 2 and rows[1].heading and rows[1].label == "Other" and rows[2].label == "Snakish")
+local groups = MENU.ByCategory({ { title = "Zed", category = "Party" }, { title = "Bee", category = "Tricks" }, { title = "Ace", category = "Tricks" }, { title = "Odd" }, { title = "Mine", category = "Custom" } })
+check("categories in their order (Tricks first, Party last of ours, an add-on's own next, Other at the end), games A to Z",
+	groups[1].name == "Tricks" and groups[1].modes[1].title == "Ace" and groups[2].name == "Party" and groups[3].name == "Custom" and groups[4].name == "Other")
 press(B.A)
 check("A opens its options", MENU.Top().title == "Host Snakish")
 press(B.RIGHT)
@@ -87,10 +91,17 @@ press(B.DOWN)
 press(B.A)
 check("A toggles an on/off option", MENU.Top().values.fast == true)
 press(B.DOWN)
+check("every mode gets rocket board and hoverboard switches, off by default", MENU.Top().rows()[MENU.Top().sel].label == "Rocket board" and MENU.Top().values._rocket == 0 and MENU.Top().values._hover == false)
+press(B.DOWN)
+press(B.DOWN)
+press(B.DOWN)
 local hostRow = MENU.Top().rows()[MENU.Top().sel]
 check("Host it waits until every point is placed", hostRow.label == "Host it" and hostRow.disabled)
 press(B.A)
 check("... so A does nothing yet", hosted == nil and MENU.IsOpen())
+press(B.UP)
+press(B.UP)
+press(B.UP)
 press(B.UP)
 press(B.UP)
 press(B.UP)
@@ -107,6 +118,9 @@ check("A places the point where you're looking", MENU.Top().values.goal and MENU
 press(B.DOWN)
 press(B.DOWN)
 press(B.DOWN)
+press(B.DOWN)
+press(B.DOWN)
+press(B.DOWN)
 press(B.A)
 check("Host it: the mode gets every value", hosted and hosted.time == 30 and hosted.fast == true and hosted.goal.pos == traceHit)
 check("... the area as a circle around where the host stands", hosted.area.radius == 768 and hosted.area.centre.x == 10)
@@ -116,14 +130,18 @@ mode.state = { phase = "lobby", host = 1, players = { { ent = 1 } } }
 press(B.LEFT, B.LB)
 rows = MENU.Top().rows()
 check("hosting: LB + D-pad left goes straight to my game", MENU.Top().title:find("you're hosting", 1, true) ~= nil)
-check("... Start the game, Close the game", rows[1].label == "Start the game" and rows[2].label == "Close the game")
+check("... Start the game, Invite players, Close the game", rows[1].label == "Start the game" and rows[2].label == "Invite players" and rows[3].label == "Close the game")
 sent = {}
 press(B.A)
 check("Start sends begin", sent[1] and sent[1].msg.cmd == "begin" and not MENU.IsOpen())
 mode.state = { phase = "playing", host = 1, players = { { ent = 1 } } }
 press(B.LEFT, B.LB)
 rows = MENU.Top().rows()
-check("a game going: End this round, or Close the game", rows[1].label == "End this round" and rows[2].label == "Close the game")
+check("a game going (even a countdown): Restart (same players and settings), or Close the game", rows[1].label == "Restart" and rows[2].label == "Close the game")
+sent = {}
+press(B.A)
+check("Restart: back to its lobby and straight off again (stop, then begin)", sent[1] and sent[1].msg.cmd == "stop" and not sent[1].msg.close and sent[2] and sent[2].msg.cmd == "begin")
+press(B.LEFT, B.LB)
 sent = {}
 press(B.DOWN)
 press(B.A)
@@ -225,7 +243,7 @@ check("X on someone on foot: next to where they stand", tele and math.abs(tele.p
 press(B.RIGHT, B.LB)
 press(B.A)
 check("A: spectating them, my skater frozen, the camera on them", MENU.spec and MENU.spec.target == ANN and api.frozen == true and api.view ~= nil)
-check("... and my skater hidden from everyone", api.hidden and api.hidden.spectate == true)
+check("... and my skater hidden from everyone", api.hidden and api.hidden.menuspec == true)
 local v = api.view(nil, nil, 70)
 check("... a chase camera looking at them", v and (v.origin - Vector(100, 0, 50)):Length() < 200)
 press(B.RIGHT)
@@ -237,7 +255,7 @@ press(B.RIGHT, B.LB)
 press(B.A)
 press(B.B)
 check("B stops: my skater and camera back", not MENU.spec and not MENU.IsOpen() and api.frozen == false and api.view == nil and api.blocked == false)
-check("... visible again", api.hidden.spectate == false)
+check("... visible again", api.hidden.menuspec == false)
 player = { GetAll = function() return { ME } end }
 press(B.RIGHT, B.LB)
 rows = MENU.Top().rows()
@@ -264,3 +282,16 @@ SKATEGM_UI.Take("replay", {})
 press(B.RB, B.LB)
 check("while a replay plays, the menus stay shut", not MENU.IsOpen())
 SKATEGM_UI.Give("replay")
+local free = { EntIndex = function() return 21 end, Nick = function() return "Free" end }
+local busy = { EntIndex = function() return 22 end, Nick = function() return "Busy" end }
+player = { GetAll = function() return { LocalPlayer(), free, busy } end }
+local oldGameOf = SKATEGM_MODES.GameOf
+SKATEGM_MODES.GameOf = function(p) return p == busy and mode or nil end
+local invRows = MENU.InviteScreen(mode).rows()
+check("invite list: everyone else, those in a minigame greyed out", #invRows == 2 and invRows[1].label == "Free" and not invRows[1].disabled and invRows[2].disabled)
+sent = {}
+invRows[1].run()
+check("... A sends the invite", sent[1] and sent[1].msg.cmd == "_invite" and sent[1].msg.target == 21 and MENU.InviteScreen(mode).rows()[1].sub ~= nil)
+SKATEGM_MODES.GameOf = oldGameOf
+local placed = MENU.Resolve(mode.hostDef, { _start = { pos = Vector(700, 800, 9), yaw = 0 }, area = 512 })
+check("a placed Start: the play area is centred on it, not on me", placed.area.centre.x == 700 and placed.area.centre.y == 800 and placed.area.radius == 512)

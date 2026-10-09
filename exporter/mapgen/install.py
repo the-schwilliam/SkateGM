@@ -10,7 +10,7 @@ from .build import build
 from .source import GameSource
 from .sourcetools import ToolError
 
-BUILD_VERSION = 2
+BUILD_VERSION = 4
 ADDON = 'skategm_maps'
 ADDON_JSON = {'title': 'SkateGM: Skate 3 maps (built on this PC)', 'type': 'map', 'tags': ['fun'], 'ignore': []}
 
@@ -36,6 +36,7 @@ def read_state(gmod):
 
 
 PARALLEL = 2
+FREE_NEEDED = 10 * 2**30 # scratch space: ~4 GB a map while it builds, two at once
 
 
 def prepare_shared(source, regions, work, report=print):
@@ -89,6 +90,11 @@ def install_maps(game, gmod, work, report=print, names=None, force=False, parall
         else:
             todo.append(region)
     if todo:
+        work.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(work).free
+        if free < FREE_NEEDED:
+            raise RuntimeError(f'building maps needs about {FREE_NEEDED // 2**30} GB free on the drive with {work} '
+                               f'(it has {free / 2**30:.1f} GB): free some space and try again')
         report("Reading Skate 3's districts...")
         prepare_shared(source, todo, work, report)
     queue = multiprocessing.Queue()

@@ -53,7 +53,7 @@ tri = np.array([[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]]], np.float
 data = skatecol.encode(tri, np.array([5]), [(np.array([[0.0, 0.0, 1.0], [9.0, 0.0, 1.0]]), False)])
 t2, s2, r2 = skatecol.decode(data)
 check("the packed skate collision reads back exactly", np.array_equal(t2, tri) and list(s2) == [5] and np.allclose(r2[0][0][1], [9, 0, 1]))
-check("... and the module's reader agrees on the layout (magic, version, counts)", data[:4] == b"SK3C" and struct.unpack_from("<III", data, 4) == (1, 1, 1))
+check("... and the module's reader agrees on the layout (magic, version, counts)", data[:4] == b"SK3C" and struct.unpack_from("<III", data, 4) == (skatecol.VERSION, 1, 1))
 
 from mapgen import tone
 check("tone curve: dark kept, bright compressed below white, monotonic", tone.filmic(0.0) == 0.0 and tone.filmic(10.0) < 1.0 and np.all(np.diff(tone.filmic(np.linspace(0, 8, 50))) > 0))
@@ -226,3 +226,29 @@ with tempfile.TemporaryDirectory() as tmp:
     dup = Part('skategm/t/mat', np.concatenate([tri, tri[:1]]), np.tile([0.0, 0.0, 1.0], (3, 3, 1)), np.concatenate([part.uvs, part.uvs[:1]]))
     v, f = mdlwrite._mesh(dup, np.zeros(3), lambda p: p)
     check("... duplicate triangles collapse (as studiomdl does)", len(f) == 2)
+
+# vbsp's uninitialised padding byte in each static prop: cleared, so every build of a map is the same file
+def fake_bsp(padding):
+    props = b''
+    for i, pad in enumerate(padding):
+        p = bytearray(72)
+        struct.pack_into('<3f', p, 0, i * 10.0, 0, 0)
+        p[30], p[31] = 6, pad
+        props += bytes(p)
+    sprp = struct.pack('<i', 1) + b'models/x.mdl'.ljust(128, b'\0') + struct.pack('<i', 0) + struct.pack('<i', len(padding)) + props
+    header_len = 8 + 64 * 16 + 4
+    game = struct.pack('<i', 1) + struct.pack('<iHHii', struct.unpack('<i', b'prps')[0], 0, 10, header_len + 20, len(sprp))
+    head = bytearray(header_len)
+    head[0:4] = b'VBSP'
+    struct.pack_into('<i', head, 4, 20)
+    struct.pack_into('<iiii', head, 8 + 35 * 16, header_len, len(game) + len(sprp), 0, 0)
+    return bytes(head) + game + sprp
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    a, b = Path(tmp) / 'a.bsp', Path(tmp) / 'b.bsp'
+    a.write_bytes(fake_bsp([0x7e, 0x00, 0xc1]))
+    b.write_bytes(fake_bsp([0x00, 0x3f, 0x7f]))
+    n = vertexlight.clear_prop_padding(a)
+    vertexlight.clear_prop_padding(b)
+    check("static props' padding byte (vbsp leaves it uninitialised) is cleared: two builds give the same file", n == 3 and a.read_bytes() == b.read_bytes() and a.read_bytes()[-72 + 30] == 6)

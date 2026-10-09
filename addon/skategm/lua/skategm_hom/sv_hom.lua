@@ -16,6 +16,7 @@ local function Public(now)
 	t.spot, t.yaw = S.spot, S.yaw
 	t.turn, t.rounds, t.round, t.pain = S.turn, S.rounds, S.round, S.pain
 	t.active = IsValid(S.active) and S.active:EntIndex() or 0
+	t.nextUp = SKATEGM_MODES.UpNext(S.players, S.index, (S.round or 1) < (S.rounds or 1))
 	t.timeLeft = S.deadline and math.max(0, S.deadline - now) or 0
 	t.live = S.live
 	t.bailing = S.bailing
@@ -133,8 +134,7 @@ function HOM.Command(ply, m, now)
 	if not HOM.Allowed() and cmd ~= "leave" then return Tell(ply, "Hall of Meat is turned off on this server") end
 	if cmd == "create" then
 		if S.phase ~= "idle" then return Tell(ply, "a game is already set up: join it") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working to host") end
+		if HOM.mode:CantSkate(ply, m, "host") then return end
 		local x, y, z = Num(m.x), Num(m.y), Num(m.z)
 		if not (x and y and z) then return end
 		S.phase, S.host, S.players, S.entries = "lobby", ply, {}, {}
@@ -145,8 +145,7 @@ function HOM.Command(ply, m, now)
 		Tell(nil, ply:Nick() .. " is hosting Hall of Meat: join with LB + D-pad left")
 	elseif cmd == "join" then
 		if S.phase == "idle" or S.phase == "final" then return Tell(ply, "no game to join") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working to play") end
+		if HOM.mode:CantSkate(ply, m, "play") then return end
 		AddPlayer(ply, now)
 	elseif cmd == "leave" then
 		RemovePlayer(ply, now)
@@ -159,7 +158,11 @@ function HOM.Command(ply, m, now)
 	elseif cmd == "stop" then
 		if S.phase == "idle" then return end
 		if not (host or ply:IsAdmin()) then return Tell(ply, "only the host or an admin can stop it") end
-		Stop("Hall of Meat was closed by " .. ply:Nick(), now)
+		if S.phase == "lobby" or m.close then return Stop("Hall of Meat was closed by " .. ply:Nick(), now) end
+		for _, p in ipairs(S.players) do if IsValid(p) then p:Freeze(false) end end
+		S.phase, S.active, S.deadline, S.live, S.last, S.winner, S.round, S.index = "lobby", nil, nil, nil, nil, nil, 1, 0
+		Broadcast(now)
+		Tell(nil, ply:Nick() .. " stopped the game: back to the lobby")
 	elseif cmd == "ready" then
 		if S.phase ~= "prep" or ply ~= S.active then return end
 		S.phase, S.deadline = "countdown", now + HOM.COUNTDOWN

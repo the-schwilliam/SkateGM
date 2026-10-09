@@ -54,7 +54,7 @@ def main(argv=None):
     failed = []
     for region in chosen:
         try:
-            final, _, shots = build(region, Path(a.game), Path(gmod), Path(a.out), Path(a.work), workers=a.workers,
+            final, _, shots = build(region, Path(a.game).resolve(), Path(gmod), Path(a.out).resolve(), Path(a.work).resolve(), workers=a.workers,
                                     keep=a.keep, fast=a.fast)
         except Exception:
             traceback.print_exc()

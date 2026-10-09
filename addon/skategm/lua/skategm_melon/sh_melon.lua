@@ -12,7 +12,7 @@
 --   results   the winner, then back to the lobby
 MELON = MELON or {}
 
-MELON.mode = SKATEGM_MODES.Register({ id = "melon", title = "Melon King", order = 5, color = Color(90, 220, 90) })
+MELON.mode = SKATEGM_MODES.Register({ music = "arena", id = "melon", category = "Arena", title = "Melon King", order = 5, color = Color(90, 220, 90) })
 MELON.NET_STATE = MELON.mode.NET_STATE
 MELON.NET_CMD = MELON.mode.NET_CMD
 

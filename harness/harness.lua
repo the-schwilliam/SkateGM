@@ -423,6 +423,7 @@ local function board(q)
 end
 local WINDOW = 4
 if os.getenv("SK8_SHAKE") and skategm.SetCameraShake then skategm.SetCameraShake(tonumber(os.getenv("SK8_SHAKE"))) end
+if os.getenv("SK8_CAMTYPE") and skategm.SetCameraType then skategm.SetCameraType(tonumber(os.getenv("SK8_CAMTYPE"))) end
 TIMING = os.getenv("SK8_TIMING") and { n = 0, sum = 0, max = 0, slow = 0, vslow = 0 } or nil
 local function ride(r)
 	local x, y, z, yaw = spots[r][1], spots[r][2], spots[r][3], spots[r][4]
@@ -627,6 +628,7 @@ local function ride(r)
 				end
 				TIMING.lastUp = { u[1], u[2], u[3] }
 				if os.getenv("SK8_CAMLOG") then log("cam %d %.6f %.6f %.6f %.3f %.3f %.3f", i, u[1], u[2], u[3], q.cam.pos[1], q.cam.pos[2], q.cam.pos[3]) end
+				if os.getenv("SK8_CAMLOG") and q.pos then log("camrel %d %s %.2f %.2f", i, tostring(q.state), q.cam.pos[3] - q.pos[3], math.sqrt((q.cam.pos[1] - q.pos[1]) ^ 2 + (q.cam.pos[2] - q.pos[2]) ^ 2)) end
 			end
 		end
 		local s = q.state or "?"
@@ -722,6 +724,9 @@ local function ride(r)
 			-- isn't a loss, only the horizontal part of it shrinks)
 			speeds[#speeds + 1] = math.sqrt(d * d + ddz * ddz) / ticks * 60 * 0.0254
 			heads[#heads + 1] = d > 0.01 and { ddx / d, ddy / d } or heads[#heads]
+		end
+		if os.getenv("SK8_AUDIOLOG") then
+			log("  audio %d %s: %s %s %s %s grind %s", i, tostring(q.state), tostring(q.audioWheel0), tostring(q.audioWheel1), tostring(q.audioWheel2), tostring(q.audioWheel3), tostring(q.audioGrind))
 		end
 		if verbose and q.pos then
 			local b = q.bones or {}

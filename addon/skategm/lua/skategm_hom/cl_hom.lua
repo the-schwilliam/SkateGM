@@ -10,7 +10,7 @@ local function Say(text, bad) HOM.mode:Say(text, bad) end
 function C.Me(st) return HOM.mode:Me(st) end
 function C.IsHost(st) return HOM.mode:IsHost(st) end
 function C.IsMine(st) return st.active and st.active ~= 0 and st.active == LocalPlayer():EntIndex() end
-local ACTIVE = { prep = true, countdown = true, turn = true }
+local ACTIVE = { prep = true, countdown = true, turn = true, between = true }
 
 function C.LevelColor(level, a)
 	local l = HOM.LEVELS[level]
@@ -25,7 +25,9 @@ function C.OnState(st, now)
 	local mine, wasMine = C.IsMine(st), C.IsMine(prev)
 	local me = C.Me(st)
 	-- someone else's turn: watching them bail, out of sight and out of the way
-	if a and a.SetHidden then a.SetHidden("hom", (me and ACTIVE[st.phase] and not mine) or false) end
+	local waiting = (me and ACTIVE[st.phase] and not mine and not SKATEGM_MODES.JustDone(st)) or false
+	if a and a.SetHidden then a.SetHidden("hom", waiting) end
+	HOM.mode:KeepApart(me ~= nil and ACTIVE[st.phase])
 	if st.phase == "prep" and mine and not (prev.phase == "prep" and wasMine) then
 		C.readyAt, C.card = nil, nil
 		if a and not a.IsSkating() and not a.IsLoading() then a.StartSkating() end
@@ -38,7 +40,7 @@ function C.OnState(st, now)
 		C.tracker = nil
 		C.EndSlowmo()
 	end
-	HOM.mode:Watch(ACTIVE[st.phase] and me and not mine, function() return C.View(RealTime(), true) end)
+	HOM.mode:Spectate(waiting and SKATEGM_MODES.Others(st) or nil, { prefer = st.active or (st.last and st.last.ent) })
 	local live = st.live and st.live.injuries or {}
 	if not mine and #live > (C.liveSeen or 0) then
 		for i = (C.liveSeen or 0) + 1, #live do
@@ -140,7 +142,6 @@ function C.View(now, skating)
 		return { origin = pos, angles = (spot - pos):Angle(), drawviewer = false }
 	end
 end
-hook.Add("CalcView", "skategm_hom", function() return C.View(RealTime()) end)
 
 function C.XrayInjuries()
 	if C.IsMine(C.state) then return C.injuries end
@@ -244,6 +245,7 @@ function C.DrawCard(w, h, name, r)
 end
 
 function C.Paint(w, h, now)
+	if SKATEGM_MODES.HudHidden() then return end
 	local st = C.state
 	if st.phase == "idle" then return end
 	HOM.mode:Fonts(FONTS)
@@ -252,8 +254,6 @@ function C.Paint(w, h, now)
 	local active = st.active and Entity(st.active)
 	local activeName = IsValid(active) and active.Nick and active:Nick() or "?"
 	if st.phase == "lobby" then
-		Text("HALL OF MEAT", "skategm_hom_mid", w / 2, h * 0.04, RED)
-		Text(C.IsHost(st) and "you're the host: LB + D-pad left to start" or (C.Me(st) and "waiting for the host to start" or "LB + D-pad left to join"), "skategm_hom_small", w / 2, h * 0.08, color_white)
 	elseif st.phase == "prep" then
 		Text(mine and "your turn: getting you to the spot" or (activeName .. " is up next"), "skategm_hom_mid", w / 2, h * 0.06, RED)
 	elseif st.phase == "countdown" then
@@ -305,7 +305,8 @@ HOM.mode:JoinInfo(function(st)
 	return { host = (host and IsValid(host)) and host:Nick() or "someone", phase = st.phase, joinable = me == nil, mine = C.IsHost(st), playing = me ~= nil }
 end)
 HOM.mode:Host({
-	description = "take turns bailing from where you stand: the most painful bail wins",
+	description = "get hurt the most in one bail",
+	about = "Take turns bailing as hard as you can. Every bone you hurt adds to your score. The most painful bail wins.",
 	options = {
 		{ key = "turn", label = "Time to start your bail", type = "number", min = HOM.TURN_MIN, max = HOM.TURN_MAX, step = 5, default = HOM.TURN_DEFAULT, format = function(v) return v .. " s" end },
 		{ key = "rounds", label = "Rounds", type = "number", min = HOM.ROUNDS_MIN, max = HOM.ROUNDS_MAX, step = 1, default = HOM.ROUNDS_DEFAULT },

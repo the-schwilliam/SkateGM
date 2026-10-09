@@ -1617,6 +1617,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "lzma-rs",
+ "serde",
  "serde_json",
  "skate-host",
  "vbsp",

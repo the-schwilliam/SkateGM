@@ -46,6 +46,8 @@ def payload_dir(name):
     repo = Path(__file__).resolve().parent.parent
     if name == 'addon':
         return repo / 'addon' / 'skategm'
+    if name == 'aems_render.exe':
+        return repo / 'engine' / 'target' / 'release' / 'examples' / name
     return repo / 'gm_skategm' / 'prebuilt' / name
 
 
@@ -119,6 +121,10 @@ class Cancelled(Exception):
     pass
 
 
+def installed(gmod):
+    return (Path(gmod) / 'garrysmod' / 'addons' / 'skategm').is_dir()
+
+
 def data_ready(data):
     assets = Path(data) / 'assets'
     return all((assets / f).is_file() for f in ('private/skater.glb', 'private/game.json', 'private/stock/physics-skeletons.json'))
@@ -172,6 +178,8 @@ def install(gmod, xex, data, report, skip_convert=False, build_maps=True, map_na
         raise RuntimeError("Couldn't replace the engine module: close Garry's Mod and try again.")
     (garrysmod / 'data' / 'skategm').mkdir(parents=True, exist_ok=True)
     (garrysmod / 'data' / 'skategm' / 'datapath.txt').write_text(str((data / 'assets').resolve()).replace('\\', '/'), encoding='utf-8')
+    install_hud(garrysmod, xex or remembered_source(data), data, report)
+    install_sounds(gmod, xex or remembered_source(data), data, report)
     if build_maps:
         install_maps(gmod, xex or remembered_source(data), data, report, map_names)
     report('Done! Start Garry\'s Mod and pick the SkateGM gamemode, or in any other gamemode type '
@@ -191,6 +199,44 @@ def remembered_source(data):
     except OSError:
         return None
     return path if path.exists() else None
+
+
+def install_hud(garrysmod, game, data, report):
+    """Skate 3's own trick display, from the player's game, where the add-on reads it."""
+    prepared = Path(data) / 'assets' / 'private' / 'gmod_hud'
+    if not (prepared / 'runtime' / 'trickdisplay.json').is_file() and game:
+        try:
+            import convert as exporter
+            exporter.prepare_hud(Path(game), Path(data))
+        except Exception as error:
+            traceback.print_exc()
+            report("Skate 3's trick display was skipped: " + (str(error) or type(error).__name__))
+    target = garrysmod / 'data' / 'skategm_hud'
+    if (prepared / 'runtime' / 'trickdisplay.json').is_file():
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(prepared, target)
+        report("Skate 3's trick display: installed")
+
+
+def install_sounds(gmod, game, data, report):
+    """Skate 3's own board sounds, from the player's game (a few seconds)."""
+    try:
+        from tools.asset_pipeline import skate3_sounds
+        if skate3_sounds.installed(gmod):
+            report('Skate 3 board sounds: already installed, keeping them')
+            return
+    except Exception:
+        traceback.print_exc()
+    if not game:
+        report('Skate 3 board sounds: choose your Skate 3 disc image (.iso) or default.xex to use them.')
+        return
+    try:
+        import convert as exporter
+        exporter.build_sounds(Path(game), Path(data), Path(gmod), payload_dir('vgmstream') / 'vgmstream-cli.exe',
+                              payload_dir('aems_render.exe'))
+    except Exception as error:
+        traceback.print_exc()
+        report('Skate 3 board sounds were skipped (the stock ones play): ' + (str(error) or type(error).__name__))
 
 
 def install_maps(gmod, game, data, report, names=None):
@@ -222,6 +268,9 @@ def uninstall(gmod, data, report, remove_data=False):
             raise RuntimeError("Couldn't remove the engine module: close Garry's Mod and try again.")
     (garrysmod / 'data' / 'skategm' / 'datapath.txt').unlink(missing_ok=True)
     remove_tree(garrysmod / 'addons' / 'skategm_maps')
+    remove_tree(garrysmod / 'data' / 'skategm_hud')
+    remove_tree(garrysmod / 'addons' / 'skategm_s3sounds')
+    (garrysmod / 'data' / 'skategm' / 'skate3_sounds.json').unlink(missing_ok=True)
     if remove_data:
         shutil.rmtree(data, ignore_errors=True)
     report('SkateGM removed.' + (' Your converted game data was deleted too.' if remove_data else ''))
@@ -339,6 +388,8 @@ def window():
     buttons = ttk.Frame(frm)
     buttons.grid(column=0, row=11, columnspan=3, pady=(8, 0), sticky='e')
 
+    seen = {}
+
     def check():
         notes = []
         g = gmod_var.get().strip()
@@ -353,12 +404,17 @@ def window():
             if old:
                 notes.append(f"{len(old)} of your Skate 3 maps came from an older SkateGM ({', '.join(old)}). Tick Generate maps to "
                              "rebuild them: friends whose map differs from yours can't join you.")
-        has = data_ready(data_var.get().strip() or DEFAULT_DATA)
+        here = data_var.get().strip() or str(DEFAULT_DATA)
+        has = data_ready(here)
         if has:
             reuse_box.state(['!disabled'])
+            if seen.get('data') != here:
+                reuse.set(True)
         else:
             reuse.set(False)
             reuse_box.state(['disabled'])
+        seen['data'] = here
+        install_button.configure(text='Update' if g and is_gmod(g) and installed(g) else 'Install')
         status.set('\n'.join(notes))
 
     def say(text):
@@ -404,6 +460,8 @@ def window():
             return messagebox.showerror(TITLE, 'Choose your Skate 3 disc image (.iso) or default.xex first.')
         chosen = [name for name, var in picks.items() if var.get()]
         build = maps.get() and (bool(chosen) or not picks)
+        if build and not x:
+            return messagebox.showerror(TITLE, 'Generating maps needs your Skate 3 disc image (.iso): choose it first.')
         run(lambda: install(g, x, d, say, skip_convert=reuse.get(), build_maps=build, map_names=chosen or None))
 
     def do_uninstall():
@@ -425,7 +483,10 @@ def window():
     sys.stdout = sys.stderr = LogStream()
 
     ttk.Button(buttons, text='Uninstall', command=do_uninstall).grid(column=0, row=0, padx=6)
-    ttk.Button(buttons, text='Install', command=do_install).grid(column=1, row=0, padx=6)
+    install_button = ttk.Button(buttons, text='Install', command=do_install)
+    install_button.grid(column=1, row=0, padx=6)
+    for var in (gmod_var, data_var):
+        var.trace_add('write', lambda *_: check())
     check()
     root.mainloop()
 

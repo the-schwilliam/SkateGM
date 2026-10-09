@@ -194,7 +194,7 @@ function C.MyLookNow()
 	local cvRocket = GetConVar and GetConVar("skategm_rocket")
 	return { type = def and def.id or BOARD.DEFAULT_TYPE, opts = BOARD.Options(x), effects = effects, deck = ToColor(BOARD.ParseColor(deck)), wheels = ToColor(BOARD.ParseColor(wheels)),
 		mat = (def and def.image and image ~= "" and C.MyImageName(image)) and C.Material(C.MyImageName(image), RealTime()) or nil, rocket = cvRocket and cvRocket:GetBool() or false,
-		rollSound = BOARD.ROLL_SOUNDS[x.rs or 1][2], rocketSound = BOARD.ROCKET_SOUNDS[x.ks or 1][2], hover = x.hv == true }
+		rollSound = BOARD.ROLL_SOUNDS[x.rs or 1][2], rollChosen = (x.rs or 1) > 1, rocketSound = BOARD.ROCKET_SOUNDS[x.ks or 1][2], hover = x.hv == true }
 end
 
 function C.SendLook()
@@ -305,7 +305,7 @@ function C.LookFor(ply)
 		for _, fx in ipairs(BOARD.EFFECTS) do look.effects[fx.id] = BOARD.EffectOptions(x, fx.id) end
 	end
 	return { type = x.bt or BOARD.DEFAULT_TYPE, opts = BOARD.Options(x), effects = look.effects, deck = look.deck, wheels = look.wheels, mat = mat, rocket = look.rocket,
-		rollSound = BOARD.ROLL_SOUNDS[x.rs or 1][2], rocketSound = BOARD.ROCKET_SOUNDS[x.ks or 1][2], hover = x.hv == true }
+		rollSound = BOARD.ROLL_SOUNDS[x.rs or 1][2], rollChosen = (x.rs or 1) > 1, rocketSound = BOARD.ROCKET_SOUNDS[x.ks or 1][2], hover = x.hv == true }
 end
 
 function C.Draw(ply, P, look, graphic, rocket, hover, drawBoard)
@@ -417,6 +417,7 @@ function C.Defaults()
 		{ "skategm_rocket_sound", "1" },
 		{ "skategm_hoverboard", "0" },
 		{ "skategm_rocket", "0" },
+		{ "skategm_rocket_fuel", "0" },
 		{ "skategm_board_type", BOARD.DEFAULT_TYPE },
 	}
 	for _, group in ipairs({ BOARD.TYPES, BOARD.EFFECTS }) do

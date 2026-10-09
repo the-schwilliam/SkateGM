@@ -11,7 +11,7 @@
 --   final     standings: the best single turn owns the spot
 OTS = OTS or {}
 
-OTS.mode = SKATEGM_MODES.Register({ id = "ots", title = "Own the Spot", order = 2, color = Color(255, 200, 80), netState = "skategm_ots_state", netCommand = "skategm_ots_cmd" })
+OTS.mode = SKATEGM_MODES.Register({ id = "ots", category = "Tricks", title = "Own the Spot", order = 2, color = Color(255, 200, 80), netState = "skategm_ots_state", netCommand = "skategm_ots_cmd" })
 OTS.NET_STATE = OTS.mode.NET_STATE
 OTS.NET_CMD = OTS.mode.NET_CMD
 

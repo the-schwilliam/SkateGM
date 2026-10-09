@@ -11,13 +11,13 @@
 -- Skaters don't collide with each other while racing.
 RACE = RACE or {}
 
-RACE.mode = SKATEGM_MODES.Register({ id = "race", title = "Race", order = 1, color = Color(120, 220, 255), netState = "skategm_race_state", netCommand = "skategm_race_cmd" })
+RACE.mode = SKATEGM_MODES.Register({ music = "arena", id = "race", category = "Sports", title = "Race", order = 1, color = Color(120, 220, 255), netState = "skategm_race_state", netCommand = "skategm_race_cmd" })
 RACE.NET_STATE, RACE.NET_CMD = RACE.mode.NET_STATE, RACE.mode.NET_CMD
 
 RACE.RADIUS_MIN, RACE.RADIUS_MAX, RACE.RADIUS_DEFAULT = 50, 800, 150
 RACE.LIMIT_MIN, RACE.LIMIT_MAX, RACE.LIMIT_DEFAULT = 30, 900, 180
 RACE.PREP_TIMEOUT = 40 -- seconds to get into Skater mode
-RACE.COUNTDOWN = 5
+RACE.COUNTDOWN = 3
 RACE.RESULTS = 12
 RACE.MAX_PLAYERS = 16
 

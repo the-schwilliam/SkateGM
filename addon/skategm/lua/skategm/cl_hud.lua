@@ -120,7 +120,13 @@ function S.HudPaint(w, h, now)
 	end
 	local show = cvHud:GetBool()
 	local white = Color(255, 255, 255)
-	if show and cvTotal:GetBool() then
+	local original = show and S.OriginalHudActive and S.OriginalHudActive()
+	if original then
+		local ok, err = pcall(S.OriginalHudPaint, w, h)
+		render.SetStencilEnable(false)
+		if not ok and not S.originalHudErr then S.originalHudErr = tostring(err) Say("trick display error: " .. S.originalHudErr, true) end
+	end
+	if show and cvTotal:GetBool() and not (ITEMS and ITEMS.client and ITEMS.client.CornerTaken and ITEMS.client.CornerTaken()) then
 		Shadowed("TOTAL", "skategm_small", w - w * 0.03, h * 0.04, Color(220, 220, 220), TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
 		Shadowed(Commas(H.total), "skategm_mid", w - w * 0.03, h * 0.065, white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
 	end
@@ -128,7 +134,7 @@ function S.HudPaint(w, h, now)
 	-- line score (with its multiplier), its timer bar, the pending sequence
 	local lx, base = w * 0.03, h * 0.78
 	local active = H.line > 0 or H.seq > 0 or H.lineT > 0
-	if active and show and cvLine:GetBool() then
+	if active and show and cvLine:GetBool() and not original then
 		local y = base
 		Shadowed(Commas(H.line), "skategm_huge", lx, y, white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 		if H.mult > 1.001 then
@@ -150,7 +156,7 @@ function S.HudPaint(w, h, now)
 	-- trick name, just above the line score, fading out after it was last done
 	local age = now - H.trickT
 	local ty = base - h * 0.035
-	if H.trick ~= "" and age < 2.5 and show and cvTrick:GetBool() then
+	if H.trick ~= "" and age < 2.5 and show and cvTrick:GetBool() and not original then
 		local a = age < 1.8 and 1 or 1 - (age - 1.8) / 0.7
 		Shadowed(string.upper(H.trick), "skategm_big", lx, ty, white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, a)
 		if H.switch then Shadowed("SWITCH", "skategm_csmall", lx, ty - h * 0.0125, Color(200, 200, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, a) end
@@ -168,7 +174,7 @@ function S.HudPaint(w, h, now)
 		local eage = now - e.t
 		if eage > 1.8 then table.remove(H.events, i) end
 	end
-	for _, e in ipairs((show and cvCallouts:GetBool()) and H.events or {}) do
+	for _, e in ipairs((show and cvCallouts:GetBool() and not original) and H.events or {}) do
 		local eage = now - e.t
 		local a = eage < 1.2 and 1 or 1 - (eage - 1.2) / 0.6
 		Shadowed(e.text, e.big and "skategm_big" or "skategm_cmid", lx, ey, e.col, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, a)
@@ -186,6 +192,7 @@ local function EnsureHud()
 	hudPanel:SetKeyboardInputEnabled(false)
 	hudPanel.Paint = function(self, w, h)
 		if self:GetWide() ~= ScrW() or self:GetTall() ~= ScrH() then self:SetSize(ScrW(), ScrH()) end
+		if SKATEGM_MODES and SKATEGM_MODES.HudHidden and SKATEGM_MODES.HudHidden() then return end
 		local ok, err = pcall(S.HudPaint, w, h, RealTime())
 		if not ok and not S.hudErr then S.hudErr = tostring(err) Say("score display error: " .. S.hudErr, true) end
 	end

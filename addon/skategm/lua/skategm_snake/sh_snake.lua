@@ -1,6 +1,6 @@
 SNAKE = SNAKE or {}
 
-SNAKE.mode = SKATEGM_MODES.Register({ id = "snake", title = "Snake", order = 5, color = Color(120, 255, 120), maxCommandBytes = 8000 })
+SNAKE.mode = SKATEGM_MODES.Register({ music = "arena", id = "snake", category = "Arena", title = "Snake", order = 5, color = Color(120, 255, 120), maxCommandBytes = 8000 })
 SNAKE.NET_STATE, SNAKE.NET_CMD = SNAKE.mode.NET_STATE, SNAKE.mode.NET_CMD
 SNAKE.NET_TRAIL = "skategm_mode_snake_trail"
 SNAKE.cvAllowed = SNAKE.mode.cvAllowed

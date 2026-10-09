@@ -1,5 +1,6 @@
 # build output
 gm_skategm/target/
+engine/target/
 gm_skategm/build/rwrap.exe
 # local harness settings (SK8_DATA, SK8_MAPS...)
 harness/local.env
@@ -18,6 +19,8 @@ gm_skategm/prebuilt/*_5.*.dll
 gm_skategm/prebuilt/*.dll
 # SDL2 and the controller database (tools/fetch_sdl.py)
 gm_skategm/prebuilt/*.txt
+# vgmstream (tools/fetch_vgmstream.py)
+gm_skategm/prebuilt/vgmstream/
 
 # exporter build products
 exporter/tools/asset_pipeline/refpack.dll

@@ -31,6 +31,154 @@ local SND = {
 	boardSoft  = Numbered("physics/wood/wood_box_impact_soft%d.wav", 3),
 }
 
+-- Skate 3's own board sounds, when the installer made them from the player's
+-- game (addons/skategm_s3sounds + data/skategm/skate3_sounds.json; exporter
+-- asset_pipeline/skate3_sounds.py): each event plays what retail plays for it,
+-- the Splice patch layered as the game does (a member per group, its gain,
+-- pitch, delay and chance), rolling from the surface's grain at the speed's
+-- band. The surface is the engine's audio tag under the wheels (yours only:
+-- other skaters use the default)
+local cvSet = CreateClientConVar("skategm_sound_set", "0", true, false, "0 = Skate 3's own board sounds (when installed), 1 = the stock Garry's Mod ones", 0, 1)
+S.S3 = { M = nil, picks = {} }
+local S3 = S.S3
+S3.DEFAULT_TAG = 1
+S3.MPS = 52.49
+S3.FLIP_RATE = 600
+S3.SQUEAK_CHANCE = 0.35
+
+function S3.At(t, k)
+	if not t then return nil end
+	local v = t[k]
+	if v == nil then v = t[tostring(k)] end
+	if v == nil and tonumber(k) then v = t[tonumber(k)] end
+	return v
+end
+
+function S3.Load()
+	S3.M = nil
+	if not (file and file.Read) then return false end
+	local text = file.Read("skategm/skate3_sounds.json", "DATA")
+	local m = text and util.JSONToTable(text)
+	if not (m and m.banks and m.surfaces) then return false end
+	if file.Exists and not file.Exists("sound/skate3/grains", "GAME") then return false end
+	S3.M = m
+	return true
+end
+
+function S3.On()
+	return S3.M ~= nil and not cvSet:GetBool()
+end
+
+function S3.Surface(key)
+	local tag
+	local p = S.pose
+	if p and IsValid(key) and key == LocalPlayer() then
+		for i = 0, 3 do
+			local t = p["audioWheel" .. i]
+			if t and t > 0 then tag = t break end
+		end
+	end
+	tag = math.min(tag or S3.DEFAULT_TAG, 95)
+	return S3.At(S3.M.surfaces, tag) or S3.At(S3.M.surfaces, S3.DEFAULT_TAG) or {}, tag
+end
+
+function S3.GrindSurface(key)
+	local p = S.pose
+	local tag = p and IsValid(key) and key == LocalPlayer() and p.audioGrind or 0
+	local s = tag > 0 and S3.At(S3.M.surfaces, math.min(tag, 95))
+	return (s and s.grind or 4) + 1
+end
+
+-- an index of `count` with the group's pick mode: 0 random, 2 shuffled (no
+-- repeat until each was played), else in turn
+function S3.Pick(state, count, mode)
+	if count <= 1 then return 1 end
+	if mode == 0 then return math.random(count) end
+	if mode == 2 then
+		if not state.left or #state.left == 0 then
+			state.left = {}
+			for i = 1, count do state.left[i] = i end
+		end
+		return table.remove(state.left, math.random(#state.left))
+	end
+	state.n = (state.n or 0) % count + 1
+	return state.n
+end
+
+local function Spread(v, spread)
+	if not spread or spread <= 1 then return v end
+	return v * math.Rand(1 / spread, 1)
+end
+
+-- a sound id of a Splice bank, as retail plays it
+function S3.Play(ent, bank, id, vol, depth)
+	local B = S3.M and S3.M.banks[bank]
+	if not (B and id and IsValid(ent)) or (depth or 0) > 4 then return end
+	local c = S3.At(B.containers, id)
+	if c then
+		local state = S3.picks[bank .. ":c" .. id] or {}
+		S3.picks[bank .. ":c" .. id] = state
+		return S3.Play(ent, bank, c.ids[S3.Pick(state, #c.ids, c.mode)], vol, (depth or 0) + 1)
+	end
+	local rec = S3.At(B.records, id)
+	if not rec then return end
+	local base = vol * (rec.gain or 1) * cvVolume:GetFloat()
+	local rp = (rec.pitch or 1) * (1 + (rec.pitchRand or 0) * math.Rand(-1, 1))
+	for g, group in ipairs(rec.groups) do
+		local state = S3.picks[bank .. ":" .. id .. ":" .. g] or {}
+		S3.picks[bank .. ":" .. id .. ":" .. g] = state
+		local m = group.members[S3.Pick(state, #group.members, group.mode)]
+		if m and math.random() <= (m.prob or 1) then
+			local v = math.min(1, Spread(base * (m.gain or 1), m.gainSpread))
+			local pitch = math.Clamp(math.Round(100 * rp * (m.pitch or 1) * (1 + (m.pitchRand or 0) * math.Rand(-1, 1))), 20, 255)
+			local path = "skate3/" .. bank .. "/" .. m.s .. ".wav"
+			local delay = (m.delay or 0) + (m.delayRand or 0) * math.random()
+			if v > 0.01 then
+				if delay > 0.005 then
+					timer.Simple(delay, function() if IsValid(ent) then ent:EmitSound(path, 75, pitch, v) end end)
+				else
+					ent:EmitSound(path, 75, pitch, v)
+				end
+			end
+		end
+	end
+end
+
+function S3.Abk(bank, list)
+	local picks = S3.M and S3.M.abk[bank]
+	if not picks or #picks == 0 then return nil end
+	local t = {}
+	for i, n in ipairs(list or picks) do t[i] = "skate3/" .. bank .. "/" .. n .. ".wav" end
+	return t
+end
+
+-- the rolling loop: the surface's grain, the band for this speed
+function S3.RollPath(key, speed)
+	local surface = S3.Surface(key)
+	local name = S3.At(S3.M.grainNames, surface.grain or 1) or "asphalt_rough"
+	local stem = name .. "_hard"
+	local curve = S3.M.grains[stem]
+	if not curve then stem, curve = "asphalt_rough_hard", S3.M.grains.asphalt_rough_hard end
+	local kmh = speed / S3.MPS * 3.6
+	local t = math.Clamp(kmh / ((curve and curve.max_kmh) or 60), 0, 1)
+	local b = curve and curve.bezier or { 0, 0.33, 0.66, 1 }
+	local u = 1 - t
+	local pos = u * u * u * b[1] + 3 * u * u * t * b[2] + 3 * u * t * t * b[3] + t * t * t * b[4]
+	local band = math.Clamp(math.floor(pos * 6), 0, 5)
+	return "skate3/grains/" .. stem .. "/" .. band .. ".wav"
+end
+
+-- a collision material's id for this hit: [tier 2, tier 0 x class 0..2, tier 1 x class 0..2]
+function S3.Hit(ent, material, strength, hollow)
+	if not material then return end
+	local class = strength > 0.66 and 3 or strength > 0.33 and 2 or 1
+	local id = material.ids[(hollow and 4 or 1) + class]
+	if not id or id == 0 then id = material.ids[1] end
+	S3.Play(ent, "Skate_Collisions", id, (material.gain or 1) * math.Clamp(0.4 + strength, 0.4, 1))
+end
+
+S3.Load()
+
 -- bones whose tumbling makes the body sounds during a bail
 local RAGDOLL_BONES = { "HEAD", "SPINE2", "HIPS", "RIGHTHAND", "LEFTHAND", "RIGHTFOOT", "LEFTFOOT" }
 S.SND = SND
@@ -85,8 +233,9 @@ local function Loop(A, ent, name, path, on, vol, pitch)
 	end
 end
 
-function S.RollSoundFor(key)
+function S.RollSoundFor(key, own)
 	local look = BOARD and BOARD.client and IsValid(key) and key.GetNW2String and BOARD.client.LookFor(key)
+	if own and look and look.rollChosen == false then return nil end
 	return look and look.rollSound
 end
 
@@ -140,20 +289,29 @@ local function RagdollSound(A, ent, P, centre, dt, now)
 		if pos then
 			local hit = track(name, pos, "body")
 			if hit and cvSounds:GetBool() then
-				OneShot(ent, hit > 500 and SND.bodyHard or SND.bodySoft, math.Clamp(hit / 700, 0.25, 1), math.random(90, 110))
+				if S3.On() then
+					local part = name == "HEAD" and "head" or (name == "SPINE2" or name == "HIPS") and "torso" or string.find(name, "HAND", 1, true) and "arms" or "legs"
+					S3.Hit(ent, S3.M.collision.parts[part], math.Clamp(hit / 900, 0, 1))
+				else
+					OneShot(ent, hit > 500 and SND.bodyHard or SND.bodySoft, math.Clamp(hit / 700, 0.25, 1), math.random(90, 110))
+				end
 			end
 		end
 	end
 	-- the board bounces on its own
 	local hit = track("board", centre, "board")
 	if hit and cvSounds:GetBool() then
-		OneShot(ent, hit > 400 and SND.boardHard or SND.boardSoft, math.Clamp(hit / 600, 0.25, 0.9), math.random(95, 115))
+		if S3.On() then
+			S3.Hit(ent, S3.M.collision.board, math.Clamp(hit / 800, 0, 1))
+		else
+			OneShot(ent, hit > 400 and SND.boardHard or SND.boardSoft, math.Clamp(hit / 600, 0.25, 0.9), math.random(95, 115))
+		end
 	end
 	-- sliding along the ground: hips moving fast sideways but hardly up or down
 	local hips = R.bones.HIPS
 	local flat = hips and Vector(hips.v.x, hips.v.y, 0):Length() or 0
 	local sliding = hips and flat > 90 and math.abs(hips.v.z) < 70
-	Loop(A, ent, "bodySlide", SND.bodySlide, sliding, math.Clamp(flat / 600, 0.1, 0.6), 90 + math.min(flat, 800) * 0.03)
+	Loop(A, ent, "bodySlide", S3.On() and "skate3/Bodyslide/" .. S3.BODY_SLIDE .. ".wav" or SND.bodySlide, sliding, math.Clamp(flat / 600, 0.1, 0.6), 90 + math.min(flat, 800) * 0.03)
 end
 
 -- per frame, per visible skater
@@ -195,7 +353,10 @@ function S.UpdateSound(key, ent, P, state, now, stale)
 
 	local cat = Category(state)
 	local prev = A.cat
-	if prev and prev ~= cat and cvSounds:GetBool() then
+	local s3 = S3.On()
+	if prev and prev ~= cat and cvSounds:GetBool() and s3 then
+		S3.Events(A, key, ent, prev, cat, now)
+	elseif prev and prev ~= cat and cvSounds:GetBool() then
 		if ROLLING[prev] and cat == "air" and A.vz > 40 then
 			OneShot(ent, SND.pop, 0.8)                                   -- ollie / pop out
 		end
@@ -213,7 +374,7 @@ function S.UpdateSound(key, ent, P, state, now, stale)
 		end
 	end
 	if cat == "air" then
-		if prev ~= "air" then A.minVz = 0 end
+		if prev ~= "air" then A.minVz, A.airAt = 0, now end
 		A.minVz = math.min(A.minVz, A.vz)
 	end
 	A.cat = cat
@@ -228,10 +389,14 @@ function S.UpdateSound(key, ent, P, state, now, stale)
 	end
 
 	local sp = A.speed
-	Loop(A, ent, "roll", S.RollSoundFor(key) or SND.roll, cat == "ground" and sp > 20, math.Clamp(0.1 + sp / 900, 0.15, 0.65), 60 + math.min(sp, 1400) * 0.05)
-	Loop(A, ent, "slide", SND.slide, cat == "slide" and sp > 20, math.Clamp(sp / 500, 0.15, 0.6), 80 + math.min(sp, 1500) * 0.03)
-	Loop(A, ent, "grindMetal", SND.grindMetal, cat == "metalgrind", math.Clamp(0.25 + sp / 800, 0.25, 0.7), 85 + math.min(sp, 1800) * 0.03)
-	Loop(A, ent, "grindWood", SND.grindWood, cat == "woodgrind", math.Clamp(0.25 + sp / 800, 0.25, 0.7), 80 + math.min(sp, 1800) * 0.03)
+	if s3 then
+		S3.Loops(A, key, ent, cat, sp, dt, now, P, w)
+	else
+		Loop(A, ent, "roll", S.RollSoundFor(key) or SND.roll, cat == "ground" and sp > 20, math.Clamp(0.1 + sp / 900, 0.15, 0.65), 60 + math.min(sp, 1400) * 0.05)
+		Loop(A, ent, "slide", SND.slide, cat == "slide" and sp > 20, math.Clamp(sp / 500, 0.15, 0.6), 80 + math.min(sp, 1500) * 0.03)
+		Loop(A, ent, "grindMetal", SND.grindMetal, cat == "metalgrind", math.Clamp(0.25 + sp / 800, 0.25, 0.7), 85 + math.min(sp, 1800) * 0.03)
+		Loop(A, ent, "grindWood", SND.grindWood, cat == "woodgrind", math.Clamp(0.25 + sp / 800, 0.25, 0.7), 80 + math.min(sp, 1800) * 0.03)
+	end
 
 	-- Feet. A step is a foot that was swinging coming to rest near the ground;
 	-- a planted foot is nearly still in the world (when pushing, the board rolls
@@ -261,7 +426,7 @@ function S.UpdateSound(key, ent, P, state, now, stale)
 		local planted = near and speed < 45
 		if speed > 70 or (f and ground and f.z - ground > 6) then F.swung = true end
 		if planted and not F.planted and F.swung and cvSounds:GetBool() and (cat == "walk" or ROLLING[cat]) then
-			OneShot(ent, SND.step, cat == "walk" and 0.9 or 1.0) -- walking / pushing
+			if s3 then S3.Step(A, key, ent, cat) else OneShot(ent, SND.step, cat == "walk" and 0.9 or 1.0) end
 			F.swung = false
 		end
 		F.planted = planted
@@ -270,10 +435,106 @@ function S.UpdateSound(key, ent, P, state, now, stale)
 	end
 	-- landing from an off-board jump: both feet
 	if prev == "walkair" and cat == "walk" and cvSounds:GetBool() then
-		OneShot(ent, SND.step, 1.0)
-		OneShot(ent, SND.step, 0.8)
+		if s3 then
+			S3.Step(A, key, ent, cat)
+			S3.Step(A, key, ent, cat)
+		else
+			OneShot(ent, SND.step, 1.0)
+			OneShot(ent, SND.step, 0.8)
+		end
 	end
-	Loop(A, ent, "drag", SND.drag, dragging and sp > 60 and A.accel < -60, math.Clamp(sp / 500, 0.2, 0.7), 90 + math.min(sp, 1000) * 0.02)
+	Loop(A, ent, "drag", s3 and S3.DragPath(key) or SND.drag, dragging and sp > 60 and A.accel < -60, math.Clamp(sp / 500, 0.2, 0.7), 90 + math.min(sp, 1000) * 0.02)
 end
 
 L.cvSounds, L.cvVolume = cvSounds, cvVolume
+
+-- the Skate 3 set's one-shots on a change of state
+function S3.Events(A, key, ent, prev, cat, now)
+	local M = S3.M
+	local surface = S3.Surface(key)
+	local hollow = surface.hollow == 1
+	local grind = { metalgrind = true, woodgrind = true }
+	if ROLLING[prev] and cat == "air" and A.vz > 40 then
+		local jump = math.abs(A.vz) / S3.MPS / 2.65
+		local i = jump > 0.42 and 3 or jump > 0.25 and 2 or 1
+		local gains = hollow and { 0.58, 0.76, 0.99 } or { 0.5, 0.75, 1.0 }
+		S3.Play(ent, "Skate_Collisions", (hollow and M.popHollow or M.pop)[i], gains[i])
+		if A.speed / S3.MPS > 4 then S3.Play(ent, "Skate_Collisions", M.popRoll, 0.6) end
+	end
+	if grind[cat] and not grind[prev] then
+		local g = M.grinds[S3.GrindSurface(key)]
+		if g then S3.Play(ent, g.metal and "Skate_Metal" or "Skate_Collisions", g.on[1], g.onGain[1] or 0.8) end
+	elseif prev == "air" and ROLLING[cat] and -A.minVz > 80 then
+		local air = now - (A.airAt or now)
+		local tier = (hollow and 2 or 0) + 1
+		local variant = air >= 1 and 2 or air >= 0.62 and 1 or 0
+		local v = math.Clamp(-A.minVz / 500, 0.35, 1)
+		S3.Play(ent, "Skate_Collisions", M.landing, v)
+		S3.Play(ent, "Skate_Collisions", M.touchdown[tier][1 + variant], v)
+		local sq = math.random() < S3.SQUEAK_CHANCE and S3.Abk("Brd_Squeaks")
+		if sq then OneShot(ent, sq, 0.4) end
+	end
+	if grind[prev] and not grind[cat] then
+		local g = M.grinds[S3.GrindSurface(key)]
+		if g then S3.Play(ent, g.metal and "Skate_Metal" or "Skate_Collisions", g.off[1], g.offGain[1] or 0.8) end
+	end
+	if cat == "wipeout" then
+		S3.Hit(ent, M.collision.body, 0.9)
+		S3.Hit(ent, M.collision.board, 0.7)
+	end
+end
+
+S3.STEP_IDS = { 84, 88, 92, 80, 76 }
+function S3.Step(A, key, ent, cat)
+	local surface = S3.Surface(key)
+	local kind = math.Clamp((surface.drag or 0) + 1, 1, #S3.STEP_IDS)
+	S3.Play(ent, "sk8_foley", S3.STEP_IDS[kind], cat == "walk" and 0.8 or 0.9)
+end
+
+S3.DRAG = { 36, 44, 60 }
+function S3.DragPath(key)
+	local surface = S3.Surface(key)
+	if (S3.M.dragLoops or 0) > 0 then return "skate3/loops/drag_" .. math.Clamp(surface.drag or 0, 0, 4) .. ".wav" end
+	return "skate3/FOOT_DRAG/" .. S3.DRAG[math.Clamp((surface.drag or 0) + 1, 1, #S3.DRAG)] .. ".wav"
+end
+
+S3.GRINDS = { 13, 14, 20, 21 }
+S3.SKID = { 0, 1, 2, 3, 4 }
+S3.BODY_SLIDE = 5
+function S3.Loops(A, key, ent, cat, sp, dt, now, P, w)
+	local surface = S3.Surface(key)
+	local grinding = cat == "metalgrind" or cat == "woodgrind"
+	if grinding and not A.grindLoop then A.grindLoop = S3.GRINDS[math.random(#S3.GRINDS)] end
+	if not grinding then A.grindLoop = nil end
+	local grind = "skate3/GRINDS/" .. (A.grindLoop or S3.GRINDS[1]) .. ".wav"
+	Loop(A, ent, "roll", S.RollSoundFor(key, true) or S3.RollPath(key, sp), cat == "ground" and sp > 20, math.Clamp(0.15 + sp / 900, 0.2, 0.8), 100)
+	local skid = S3.SKID[math.Clamp(surface.skid or 0, 0, #S3.SKID - 1) + 1]
+	Loop(A, ent, "slide", "skate3/loops/skid_" .. skid .. ".wav", cat == "slide" and sp > 20, math.Clamp(sp / 500, 0.2, 0.75), 95 + math.min(sp, 1500) * 0.01)
+	Loop(A, ent, "grindMetal", grind, cat == "metalgrind", math.Clamp(0.3 + sp / 800, 0.3, 0.8), 95 + math.min(sp, 1800) * 0.01)
+	Loop(A, ent, "grindWood", grind, cat == "woodgrind", math.Clamp(0.3 + sp / 800, 0.3, 0.8), 95 + math.min(sp, 1800) * 0.01)
+	if cat == "air" and P and w then S3.Flip(A, ent, P, dt, now) else A.deckUp = nil end
+end
+
+-- a flip trick: in the air, the deck's up turning fast; once per flip
+function S3.Flip(A, ent, P, dt, now)
+	local fwd = (P.RIGHT_WHEELFRONT + P.LEFT_WHEELFRONT) - (P.RIGHT_WHEELBACK + P.LEFT_WHEELBACK)
+	local side = (P.RIGHT_WHEELFRONT + P.RIGHT_WHEELBACK) - (P.LEFT_WHEELFRONT + P.LEFT_WHEELBACK)
+	local up = fwd:Cross(side)
+	if up:LengthSqr() < 1e-6 then return end
+	up:Normalize()
+	local last = A.deckUp
+	A.deckUp = up
+	if not last or dt <= 1e-4 then return end
+	local rate = math.deg(math.acos(math.Clamp(up:Dot(last), -1, 1))) / dt
+	if rate > S3.FLIP_RATE and now >= (A.nextFlip or 0) and cvSounds:GetBool() then
+		A.nextFlip = now + 0.45
+		local flips = S3.Abk("Sk8_Air_Flip_Tricks")
+		if flips then OneShot(ent, flips, 0.6) end
+	end
+end
+
+if concommand and concommand.Add then
+	concommand.Add("skategm_skate3_sounds_reload", function()
+		print("[SkateGM] Skate 3 board sounds: " .. (S3.Load() and "loaded" or "not installed (run the SkateGM installer)"))
+	end, nil, "Load Skate 3's board sounds again (after installing)")
+end

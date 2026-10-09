@@ -16,5 +16,7 @@ mod tuning;
 
 pub use physics::bridge;
 pub use skate_core::camera::SHAKE_OFF as CAMERA_SHAKE_OFF;
+pub static CAMERA_TYPE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+pub use skate_core::player::selector::AIR_TELEPORT_FRAMES;
 
 mod session_marker;

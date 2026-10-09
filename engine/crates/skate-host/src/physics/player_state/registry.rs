@@ -31,6 +31,7 @@ impl StateRegistry {
                 PhysicalStateId::Sleeping
                     | PhysicalStateId::PhysicsGround
                     | PhysicalStateId::PhysicsAir
+                    | PhysicalStateId::PhysicsAirSecondary
                     | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                     | PhysicalStateId::KnownAir
                     | PhysicalStateId::BipedAir
@@ -72,6 +73,7 @@ impl StateRegistry {
                 | (
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
+                        | PhysicalStateId::PhysicsAirSecondary
                         | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                     | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
@@ -84,6 +86,7 @@ impl StateRegistry {
                         | PhysicalStateId::LandingOnDeck,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
+                        | PhysicalStateId::PhysicsAirSecondary
                         | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                     | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir

@@ -1,6 +1,6 @@
 BINGO = BINGO or {}
 
-BINGO.mode = SKATEGM_MODES.Register({ id = "bingo", title = "Trick Bingo", order = 6, color = Color(255, 200, 90) })
+BINGO.mode = SKATEGM_MODES.Register({ id = "bingo", category = "Tricks", title = "Trick Bingo", order = 6, color = Color(255, 200, 90) })
 BINGO.NET_STATE, BINGO.NET_CMD = BINGO.mode.NET_STATE, BINGO.mode.NET_CMD
 BINGO.cvAllowed = BINGO.mode.cvAllowed
 function BINGO.Allowed() return BINGO.mode:Allowed() end

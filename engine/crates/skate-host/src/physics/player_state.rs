@@ -176,6 +176,22 @@ pub(crate) fn resume_after_climb(physics: &mut GamePhysics, skater: &mut SkaterR
 }
 
 /// Vehicle ownership has ended; reset first, then enter the native ragdoll and seed momentum.
+/// gm_sk8 addition: knocked off by a minigame item. Straight into
+/// WipeoutGround as a vehicle ejection does, keeping the board's momentum.
+pub(crate) fn force_wipeout(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<bool, String> {
+    let current = skater.player_state.current();
+    if matches!(current, PhysicalStateId::WipeoutGround | PhysicalStateId::Sleeping | PhysicalStateId::Teleporting) {
+        return Ok(false);
+    }
+    let deck = physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()].rates.linear_velocity;
+    transition::set(physics, skater, PhysicalStateId::WipeoutGround)?;
+    for body in skater.skeleton.bodies_mut() {
+        body.rates.linear_velocity = deck;
+    }
+    skater.animated_skeleton.motion.velocity_world = [deck.x, deck.y, deck.z, 0.];
+    skater.wipeout_state.state.velocity = [deck.x, deck.y, deck.z, 0.];
+    Ok(true)
+}
 pub(crate) fn apply_vehicle_ejection(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> Result<bool, String> {
     let Some((velocity, angular)) = skater.teleport_state.take_vehicle_ejection() else { return Ok(false); };
     transition::set(physics, skater, PhysicalStateId::WipeoutGround)?;

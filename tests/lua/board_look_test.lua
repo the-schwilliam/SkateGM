@@ -315,10 +315,12 @@ local function Names()
 end
 local function Row(label)
 	for _, r in ipairs(SET.BoardPage().rows) do if r.label == label then return r end end
+	for _, r in ipairs(SET.AudioPage().rows) do if r.label == label then return r end end
 end
 RunConsoleCommand("skategm_board_type", "model")
 local all = Names()
-check("Board page, model type: its own fields, sounds", all:find("|Scale|", 1, true) and all:find("|Up / down|", 1, true) and all:find("Rolling sound") and all:find("Rocket sound"))
+check("Board page, model type: its own fields", all:find("|Scale|", 1, true) and all:find("|Up / down|", 1, true))
+check("... its sounds are on the Audio page", Row("Rolling sound") and Row("Rocket sound"))
 check("... none of the skateboard's options", not all:find("Image under the deck", 1, true) and not all:find("Grip tape pattern", 1, true))
 check("... the board type row reads the type", Row("Board type").value() == "Any model")
 Row("Board type").change(-1)
@@ -344,10 +346,10 @@ check("... and its options show on the Board page", Names():find("|Brightness|",
 
 check("effects: underglow, trails, grind sparks, in that order", #BOARD.EFFECTS == 3 and BOARD.EFFECTS[1].id == "underglow" and BOARD.EFFECTS[2].id == "trails" and BOARD.EFFECTS[3].id == "sparks")
 local fx = BOARD.CleanExtra({ f_trails_length = 99, f_trails_style = 3, f_underglow_color = "red", f_underglow_on = true })
-check("effect options are cleaned too", fx.f_trails_length == 3 and fx.f_trails_style == 3 and fx.f_underglow_color == "0 200 255" and fx.f_underglow_on == true and fx.f_sparks_on == true)
+check("effect options are cleaned too", fx.f_trails_length == 3 and fx.f_trails_style == 3 and fx.f_underglow_color == "0 200 255" and fx.f_underglow_on == true and fx.f_sparks_on == false)
 BOARD.OnLook(other, "1 1 1", "", 0, t + 600, false, { f_trails_style = 2, f_trails_mode = 3, f_trails_color = "1 2 3", f_underglow_on = true })
 L = C.LookFor(other)
-check("everyone sees my effects", L.effects.trails.style == 2 and L.effects.trails.color == "1 2 3" and L.effects.underglow.on == true and L.effects.sparks.on == true)
+check("everyone sees my effects", L.effects.trails.style == 2 and L.effects.trails.color == "1 2 3" and L.effects.underglow.on == true and L.effects.sparks.on == false)
 RunConsoleCommand("skategm_trail", "4")
 RunConsoleCommand("skategm_underglow", "1")
 sent = {}
@@ -361,6 +363,8 @@ check("an effect's custom colour row is hidden unless Custom colour is picked", 
 RunConsoleCommand("skategm_trail_mode", "3")
 check("... and shown once it is", Names():find("|Trail: custom colour|", 1, true) ~= nil and BOARD.COLOUR_MODES[3] == "Custom colour")
 RunConsoleCommand("skategm_trail_mode", "1")
+check("grind sparks are off unless turned on", convars.skategm_sparks == "0")
+RunConsoleCommand("skategm_sparks", "1")
 
 local quads, beams, beamPoints, lights, particles = 0, 0, 0, 0, 0
 render = render or {}

@@ -144,7 +144,6 @@ local function Go(now)
 	G.phase, G.deadline = "playing", nil
 	G.armAt, G.avoid = now + POTATO.SCATTER, nil
 	Broadcast(now)
-	Tell(nil, "GO! Scatter - the bomb lands on someone in " .. POTATO.SCATTER .. " seconds")
 end
 
 local function AddPlayer(ply, now)
@@ -209,19 +208,18 @@ function POTATO.Command(ply, m, now)
 	if not POTATO.Allowed() and cmd ~= "leave" then return Tell(ply, "Hot Potato is turned off on this server") end
 	if cmd == "create" then
 		if G.phase ~= "idle" then return Tell(ply, "a game is already set up: join it") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working (the module and your data) to host") end
+		if POTATO.mode:CantSkate(ply, m, "host") then return end
 		local p = Vec(m.pos)
 		if not p then return end
 		G.phase, G.host, G.players, G.entries, G.keys = "lobby", ply, {}, {}, {}
 		G.start, G.yaw = p, math.NormalizeAngle(tonumber(m.yaw) or 0)
 		G.fuse, G.lives = POTATO.ClampFuse(m.fuse), POTATO.ClampLives(m.lives)
+		G.items = m.items == true
 		AddPlayer(ply, now)
 		Tell(nil, ply:Nick() .. " is hosting Hot Potato: join with LB + D-pad left")
 	elseif cmd == "join" then
 		if G.phase ~= "lobby" then return Tell(ply, G.phase == "idle" and "no game set up: !potato create starts one" or "a game is on: wait for the next one") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working (the module and your data) to play") end
+		if POTATO.mode:CantSkate(ply, m, "play") then return end
 		AddPlayer(ply, now)
 	elseif cmd == "leave" then
 		RemovePlayer(ply, now)
@@ -252,8 +250,12 @@ function POTATO.Command(ply, m, now)
 	end
 end
 
+POTATO.ITEM_AREA = 2000
 function POTATO.Think(now)
 	if G.phase == "idle" then return end
+	if ITEMS and ITEMS.server and G.start then
+		ITEMS.server.Sync(POTATO.mode, G, { on = G.items, centre = Vector(G.start[1], G.start[2], G.start[3]), radius = POTATO.ITEM_AREA })
+	end
 	for i = #(G.players or {}), 1, -1 do
 		if not IsValid(G.players[i]) then RemovePlayer(G.players[i], now, true) if G.phase == "idle" then return end end
 	end

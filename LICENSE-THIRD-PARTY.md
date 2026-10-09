@@ -3,6 +3,10 @@
 | Path | From | Licence |
 |---|---|---|
 | `exporter/tools/` (except the vendored folders below) | [SK8-ENGINE/skate-3-rust-engine](https://github.com/SK8-ENGINE/skate-3-rust-engine) `tools/`, commit `cb7968930f14dad38457e98720d1a274e469eec2` | |
+| `gm_skategm/src/hud/` | ported from [SK8-ENGINE/skate-3-rust-engine](https://github.com/SK8-ENGINE/skate-3-rust-engine)'s trick display (APT player) by renchdedsex | |
+| `engine/crates/skate-audio/`, `engine/crates/skate-audio-fma/` | [SK8-ENGINE/skate-3-rust-engine](https://github.com/SK8-ENGINE/skate-3-rust-engine) `crates/`, commit `b3c96793` (Skate 3's sound engine; the installer's `aems_render` renders the foot-brake loops with it) | GPL-3.0 (`LICENSE`) |
+| `exporter/tools/asset_pipeline/audio_formats.py`, `audio_export.py` | [SK8-ENGINE/skate-3-rust-engine](https://github.com/SK8-ENGINE/skate-3-rust-engine) `tools/asset_pipeline/`, commit `b3c96793` | GPL-3.0 (`LICENSE`) |
+| `vgmstream` (the installer; fetched by `tools/fetch_vgmstream.py`) | [vgmstream](https://github.com/vgmstream/vgmstream) r2117, decodes Skate 3's sounds on the player's PC | ISC-style (`vgmstream-COPYING.txt`) |
 | `exporter/tools/vendor/utt/` | UTT, duckyinnit | MIT (`exporter/tools/vendor/utt/LICENSE`) |
 | `exporter/tools/vendor/university/`, `exporter/tools/owned_game/` | Skate 3 Custom Engine Layer contributors | MIT (`exporter/tools/vendor/university/LICENSE-PROJECT.md`; `owned_game/NOTICE.md`) |
 | `exporter/tools/vendor/skate3_ui/` | | MIT (`exporter/tools/vendor/skate3_ui/LICENSE`) |

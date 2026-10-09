@@ -22,7 +22,10 @@ function K.Read(state,blocked,menu)
 	end
 	local function axis(positive,negative) return (held(positive) and 1 or 0)-(held(negative) and 1 or 0) end
 	local lx,ly,rx,ry=axis(KEY_D,KEY_A),0,axis(KEY_RIGHT,KEY_LEFT),axis(KEY_UP,KEY_DOWN)
-	if held(KEY_LALT) then ry=ry*.5 end
+	if held(KEY_LALT) then
+		local items=ITEMS and ITEMS.client and ITEMS.client.MyArena and ITEMS.client.MyArena()
+		if items then b=bit.bor(b,0x0040) else ry=ry*.5 end
+	end
 	if menu or (state and (state:find("Biped",1,true) or state=="OffBoardPushing")) then
 		ly=axis(KEY_W,KEY_S) b=bit.band(b,bit.bnot(0x3000))
 		if held(KEY_SPACE) then b=bit.bor(b,0x1000) end

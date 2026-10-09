@@ -191,7 +191,6 @@ local function Go(now)
 	G.phase, G.deadline = "playing", nil
 	G.dropTime, G.lastTick = now + MELON.FIRST_DROP, now
 	Broadcast(now)
-	Tell(nil, "GO! Watch the sky: the melon drops in " .. MELON.FIRST_DROP .. " seconds")
 end
 
 local function AddPlayer(ply, now)
@@ -274,8 +273,7 @@ function MELON.Command(ply, m, now)
 	if not MELON.Allowed() and cmd ~= "leave" then return Tell(ply, "Melon King is turned off on this server") end
 	if cmd == "create" then
 		if G.phase ~= "idle" then return Tell(ply, "a game is already set up: join it") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working (the module and your data) to host") end
+		if MELON.mode:CantSkate(ply, m, "host") then return end
 		local p = Vec(m.pos)
 		if not p then return end
 		local c = Vec(m.centre) or p
@@ -283,12 +281,12 @@ function MELON.Command(ply, m, now)
 		G.start, G.yaw = p, math.NormalizeAngle(tonumber(m.yaw) or 0)
 		G.area = { c[1], c[2], c[3], MELON.ClampArea(m.radius) }
 		G.target = MELON.ClampTarget(m.target)
+		G.items = m.items == true
 		AddPlayer(ply, now)
 		Tell(nil, ply:Nick() .. " is hosting Melon King: join with LB + D-pad left")
 	elseif cmd == "join" then
 		if G.phase ~= "lobby" then return Tell(ply, G.phase == "idle" and "no game set up: !melon create starts one" or "a game is on: wait for the next one") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working (the module and your data) to play") end
+		if MELON.mode:CantSkate(ply, m, "play") then return end
 		AddPlayer(ply, now)
 	elseif cmd == "leave" then
 		RemovePlayer(ply, now)
@@ -315,11 +313,16 @@ function MELON.Command(ply, m, now)
 		MELON.Steal(ply, target, now)
 	elseif cmd == "bail" then
 		MELON.Bail(ply, m.pos, now)
+	elseif cmd == "outside" then
+		if G.phase == "playing" and ply == G.king then Drop(now, MELON.DropSpot(G.area), "left the area") end
 	end
 end
 
 function MELON.Think(now)
 	if G.phase == "idle" then return end
+	if ITEMS and ITEMS.server and G.area then
+		ITEMS.server.Sync(MELON.mode, G, { on = G.items, centre = Vector(G.area[1], G.area[2], G.area[3]), radius = G.area[4] })
+	end
 	for i = #(G.players or {}), 1, -1 do
 		if not IsValid(G.players[i]) then RemovePlayer(G.players[i], now, true) if G.phase == "idle" then return end end
 	end

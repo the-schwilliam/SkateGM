@@ -104,6 +104,29 @@ impl TrajectorySelector {
         self.pending = false;
     }
 
+    ///gm_sk8 addition: a push in flight (the rocket board) bends the
+    ///selected flight. At `now` (seconds into it) the position is kept and
+    ///the velocity gains `dv`; the predicted contact moves with it.
+    pub fn push_selection(&mut self, dv: Vector, now: f32) -> bool {
+        let Some(s) = self.selection.as_mut() else { return false };
+        let bend = |t: &mut Trajectory| {
+            for i in 0..3 {
+                t.velocity[i] += dv[i];
+                t.position[i] -= dv[i] * now;
+            }
+        };
+        bend(&mut s.com_trajectory);
+        bend(&mut s.prediction.request.trajectory);
+        let left = (s.prediction.result.contact_time - now).max(0.0);
+        if s.prediction.result.contact_time >= 0.0 {
+            for i in 0..3 {
+                s.prediction.result.contact_position[i] += dv[i] * left;
+                s.collision_position[i] += dv[i] * left;
+            }
+        }
+        true
+    }
+
     ///Reset82D67228 invalidates landing observations, while retaining the
     ///in-flight request9657, winning result1680 and selected index9636.
     pub fn reset(&mut self) {

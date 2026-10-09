@@ -312,12 +312,25 @@ pub(crate) fn collision_world(
     let mut triangles = Vec::with_capacity(vertices.len());
     let mut packed_surfaces = Vec::with_capacity(vertices.len());
     for (i, source) in map.geometry.collision.iter().enumerate() {
+        use crate::physics::bridge::{SURFACE_ONE_SIDED, SURFACE_RETAIL};
+        let retail = source.surface & SURFACE_RETAIL != 0;
+        let one_sided = source.surface & SURFACE_ONE_SIDED != 0;
+        let surface = source.surface & !(SURFACE_ONE_SIDED | SURFACE_RETAIL);
         if let Some(edges) = source.native_edges {
             (flags[i], cosines[i]) = decode_native_edges(edges)?;
+            // gm_sk8: retail triangles from a BSP (bridge NATIVE_TRIANGLES)
+            // take their mesh's sidedness, as the RWCM path does
+            if retail {
+                flags[i] &= !TriangleFeature::ONE_SIDED;
+                if one_sided {
+                    flags[i] |= TriangleFeature::ONE_SIDED;
+                }
+            }
         }
         let m = &map.materials[source.material as usize - 1];
         // Exact EncodeRwSurfaceId mapping from the reference native adapter.
-        packed_surfaces.push((m.audio | (m.physics << 7) | (m.pattern << 12)) as u16);
+        // (gm_sk8: a retail triangle carries its own packed surface)
+        packed_surfaces.push(if retail { surface as u16 } else { (m.audio | (m.physics << 7) | (m.pattern << 12)) as u16 });
         // Welding is only for adjacency. Moving contact vertices to their
         // welded representatives can collapse narrow MW2 collision triangles.
         let points = source.points.map(|p| Vector3::new(p[0], p[1], p[2]));
@@ -328,7 +341,7 @@ pub(crate) fn collision_world(
             WorldTriangle::from_vertices(
                 points,
                 material,
-                source.surface,
+                surface,
                 flags[i],
                 cosines[i],
                 0.,

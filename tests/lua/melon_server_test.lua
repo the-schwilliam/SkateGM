@@ -105,6 +105,12 @@ check("not straight back off them (a moment's grace)", not MELON.Steal(bob, cat,
 check("... nor straight back by who lost it", not MELON.Steal(bob, cat, t + MELON.HOLD_GRACE + 0.1) and G.king == cat)
 host.SkateGMHips = Vector(310, 0, 36)
 check("but anyone else can, after the grace", MELON.Steal(host, cat, t + MELON.HOLD_GRACE + 0.1) and G.king == host)
+MELON.Command(cat, { cmd = "outside" }, t)
+check("someone not the King out of bounds: the melon stays put", G.king == host)
+MELON.Command(host, { cmd = "outside" }, t)
+check("the King out of bounds too long: the melon drops back inside the area", G.king == nil and IsValid(G.melonEnt) and lastChat():find("left the area", 1, true))
+if IsValid(G.melonEnt) then G.melonEnt:Remove() end
+G.king, G.kingSince, G.melonEnt = host, t, nil
 t = t + 5
 MELON.Think(t)
 check("the King bails: the melon drops where they are", MELON.Bail(host, { 310, 0, 36 }, t) and G.king == nil and IsValid(G.melonEnt) and lastChat():find("bailed and dropped"))

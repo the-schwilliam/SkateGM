@@ -216,7 +216,10 @@ fn raw_lump(bytes: &[u8], index: usize) -> Result<(Vec<u8>, u32), String> {
 
 fn authored_world(a: crate::authored::Authored, opts: Smoothing) -> World {
     let n = a.triangles.len();
-    let summary = format!("Skate 3 collision as authored: {} triangles, {} rails", n, a.rails.len());
+    let natives = crate::authored::native_rails(&a);
+    let summary = format!("Skate 3 collision as authored: {} triangles, {} rails ({} as Skate 3's own splines)", n, a.rails.len(), natives.len());
+    crate::engine::set_native_rails(natives);
+    crate::engine::set_native_triangles(crate::authored::native_triangles(&a));
     World {
         base_tris: a.triangles.clone(),
         base_tags: vec![TAG_BRUSH; n],
@@ -273,6 +276,8 @@ pub fn from_bsp_opts(bytes: &[u8], opts: Smoothing) -> Result<World, String> {
     if let Some(authored) = crate::authored::from_pack(&bsp) {
         return authored.map(|a| authored_world(a, opts));
     }
+    crate::engine::set_native_rails(Vec::new());
+    crate::engine::set_native_triangles(Vec::new());
     let leaves = leaves_in_order(bytes)?;
     if leaves.len() != bsp.leaves.len() {
         return Err(format!("leaf count mismatch ({} vs {})", leaves.len(), bsp.leaves.len()));

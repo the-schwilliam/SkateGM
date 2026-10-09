@@ -92,16 +92,14 @@ function BINGO.Command(ply, m, now)
 	if not BINGO.Allowed() and cmd ~= "leave" then return Tell(ply, "Trick Bingo is turned off on this server") end
 	if cmd == "create" then
 		if G.phase ~= "idle" then return Tell(ply, "a game is already set up: join it") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working to host") end
+		if BINGO.mode:CantSkate(ply, m, "host") then return end
 		G.phase, G.host, G.players, G.entries = "lobby", ply, {}, {}
 		G.time, G.full, G.free = BINGO.ClampTime(m.time), m.full == true, m.free ~= false
 		AddPlayer(ply, now)
 		Tell(nil, ply:Nick() .. " is hosting Trick Bingo: join with LB + D-pad left")
 	elseif cmd == "join" then
 		if G.phase == "idle" then return Tell(ply, "no game set up") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working to play") end
+		if BINGO.mode:CantSkate(ply, m, "play") then return end
 		AddPlayer(ply, now)
 		if G.phase == "playing" and Skating(ply) then G.entries[ply].playing = true Broadcast(now) end
 	elseif cmd == "leave" then

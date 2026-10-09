@@ -32,6 +32,7 @@ def main():
                     continue
                 full = os.path.join(base, name)
                 z.write(full, os.path.relpath(full, ROOT).replace(os.sep, '/'))
+        z.write(os.path.join(ROOT, 'LICENSE'), 'LICENSE')
         z.write(os.path.join(ROOT, 'LICENSE-THIRD-PARTY.md'), 'LICENSE-THIRD-PARTY.md')
         z.write(os.path.join(ROOT, 'engine', 'LICENSE'), 'engine/LICENSE')
         z.write(os.path.join(ROOT, 'engine', 'NOTICE-mashup'), 'engine/NOTICE-mashup')

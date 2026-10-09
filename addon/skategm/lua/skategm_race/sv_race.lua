@@ -96,7 +96,6 @@ local function Go(now)
 	R.phase, R.startedAt, R.deadline = "racing", now, now + R.limit
 	R.nextPlace = 1
 	Broadcast(now)
-	Tell(nil, "GO!")
 end
 
 local function Finished(ply, now)

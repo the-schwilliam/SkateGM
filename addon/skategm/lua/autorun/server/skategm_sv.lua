@@ -1,4 +1,4 @@
-for _, f in ipairs({ "sound", "hud", "marker", "water", "why", "trace", "board_model", "settings", "replay", "replay_cam", "replay_fx", "replay_export", "infmap", "keyboard", "presentation", "retarget", "retarget_math", "flickit_hud", "boundary" }) do AddCSLuaFile("skategm/cl_" .. f .. ".lua") end
+for _, f in ipairs({ "sound", "hud", "marker", "water", "why", "trace", "board_model", "settings", "replay", "replay_cam", "replay_fx", "replay_export", "infmap", "keyboard", "presentation", "retarget", "retarget_math", "flickit_hud", "boundary", "nametags", "replay_loop", "hud_original" }) do AddCSLuaFile("skategm/cl_" .. f .. ".lua") end
 -- Server half of SkateGM. The skate simulation runs on the client
 -- (gm_skategm); the server only hides the real player, keeps it following the
 -- skater (so the world around them stays networked), and puts them back on
@@ -10,6 +10,7 @@ util.AddNetworkString("skategm_off")  -- server -> everyone: this player stopped
 util.AddNetworkString("skategm_rocket") -- skater -> server -> everyone else: rocket on / off
 util.AddNetworkString("skategm_use")    -- skater -> server: use what my skater faces (RB on foot)
 util.AddNetworkString("skategm_hidden")  -- skater -> server: hide my skater (spectating, replays)
+util.AddNetworkString("skategm_inmenu")  -- skater -> server: I'm stopped in a menu (others draw me faded)
 util.AddNetworkString("skategm_respawn") -- skater -> server: where's my spawn (LB + X); server -> skater: there
 util.AddNetworkString("skategm_model")
 
@@ -156,18 +157,31 @@ SkateGM.API = {
 ---------------------------------------------------------------------------
 -- The rocket board: relay who has it lit, so everyone sees the flames
 ---------------------------------------------------------------------------
-net.Receive("skategm_rocket", function(len, ply)
-	if not (IsValid(ply) and ply.SkateGM) then return end
-	local now = SysTime()
-	if now - (ply.SkateGMRocketAt or 0) < 0.1 then return end -- at most 10 a second
-	ply.SkateGMRocketAt = now
-	local on = net.ReadBool()
+local function RelayRocket(ply)
+	if not IsValid(ply) then return end
+	ply.SkateGMRocketAt = SysTime()
 	local others = {}
 	for _, p in ipairs(player.GetAll()) do if p ~= ply then others[#others + 1] = p end end
 	net.Start("skategm_rocket")
 	net.WriteEntity(ply)
-	net.WriteBool(on)
+	net.WriteBool(ply.SkateGMRocket == true)
 	net.Send(others)
+end
+
+-- at most 10 a second, but the latest state always gets through (a quick tap's
+-- "off" used to be dropped, and the others saw the rocket lit for good)
+net.Receive("skategm_rocket", function(len, ply)
+	if not (IsValid(ply) and ply.SkateGM) then return end
+	ply.SkateGMRocket = net.ReadBool()
+	local wait = 0.1 - (SysTime() - (ply.SkateGMRocketAt or 0))
+	if wait <= 0 then return RelayRocket(ply) end
+	if ply.SkateGMRocketPending then return end
+	ply.SkateGMRocketPending = true
+	timer.Simple(wait, function()
+		if not IsValid(ply) then return end
+		ply.SkateGMRocketPending = nil
+		RelayRocket(ply)
+	end)
 end)
 
 ---------------------------------------------------------------------------
@@ -215,6 +229,11 @@ function SkateGM.SpawnFor(ply)
 	return nil
 end
 
+net.Receive("skategm_inmenu", function(len, ply)
+	if not IsValid(ply) then return end
+	ply:SetNW2Bool("SkateGMInMenu", net.ReadBool())
+end)
+
 net.Receive("skategm_hidden", function(len, ply)
 	if not IsValid(ply) then return end
 	ply:SetNW2Bool("SkateGMHidden", net.ReadBool())
@@ -226,7 +245,8 @@ net.Receive("skategm_respawn", function(len, ply)
 	if now - (ply.SkateGMRespawnAt or 0) < 1 then return end
 	ply.SkateGMRespawnAt = now
 	if hook.Run("SkateGMCanRespawn", ply) == false then return end
-	local pos, yaw = SkateGM.SpawnFor(ply)
+	local pos, yaw = hook.Run("SkateGMRespawnPoint", ply)
+	if not pos then pos, yaw = SkateGM.SpawnFor(ply) end
 	if not pos then return end
 	net.Start("skategm_respawn")
 		net.WriteFloat(pos.x) net.WriteFloat(pos.y) net.WriteFloat(pos.z) net.WriteFloat(yaw)

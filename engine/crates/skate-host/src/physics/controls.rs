@@ -190,6 +190,8 @@ impl PlayerControls {
                 &self.controller,
                 self.actor_flags,
             ));
+        // gm_sk8 addition: D-pad gestures (taunts)
+        self.intents.extend(skate_core::input::gameplay_gestures::produce(&self.controller));
         self.intents.extend(wipeout_intentions::produce(
             &self.controller,
             self.actor_flags,

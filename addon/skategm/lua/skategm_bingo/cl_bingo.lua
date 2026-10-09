@@ -12,7 +12,7 @@ function C.IsHost(st) return BINGO.mode:IsHost(st) end
 
 function C.Reset()
 	C.marks, C.pending, C.sent = {}, {}, {}
-	C.lastLine, C.lastTrickT, C.lineMult, C.airStart, C.grindStart, C.wasClean = nil, nil, 1, nil, nil, nil
+	C.lastLine, C.lastTrickT, C.lineMult, C.airStart, C.grindStart, C.wasClean, C.primed = nil, nil, 1, nil, nil, nil, nil
 end
 
 function C.OnState(st, now)
@@ -57,12 +57,17 @@ function C.Track(now)
 	local info = a.ScoreInfo and a.ScoreInfo()
 	local speed = a.Speed and a.Speed() or 0
 	if not info then return end
+	if not C.primed then
+		C.primed, C.wasClean = true, info.clean
+		C.lastLine = info.line
+	end
 	if state:find("Wipeout", 1, true) then
 		C.pending, C.lineMult, C.airStart, C.grindStart = {}, 1, nil, nil
 		C.lastLine = info.line
 		return
 	end
-	for _, c in ipairs(CellsOfKind(card, function(t) return t.kind == "speed" end)) do
+	local riding = a.OnBoard and a.OnBoard() or (state ~= "" and not state:find("Biped", 1, true))
+	for _, c in ipairs(riding and CellsOfKind(card, function(t) return t.kind == "speed" end) or {}) do
 		if speed >= c[2].value then C.Complete(c[1]) end
 	end
 	if info.clean and not C.wasClean then
@@ -126,13 +131,12 @@ local GOLD, GREY, GREEN = Color(255, 200, 90), Color(170, 170, 170), Color(110, 
 local CELL_BG, CELL_DONE, CELL_PEND, CELL_FREE = Color(0, 0, 0, 170), Color(60, 170, 80, 220), Color(200, 160, 60, 200), Color(90, 90, 90, 200)
 
 function C.Paint(w, h, now)
+	if SKATEGM_MODES.HudHidden() then return end
 	local st = C.state
 	if st.phase == "idle" then return end
 	BINGO.mode:Fonts(FONTS)
 	local left = (st.timeLeft or 0) - (now - (C.stateAt or now))
 	if st.phase == "lobby" then
-		Text("TRICK BINGO", "skategm_bingo_mid", w / 2, h * 0.04, GOLD)
-		Text(C.IsHost(st) and "you're the host: LB + D-pad left to start" or (C.Me(st) and "waiting for the host to start" or "LB + D-pad left to join"), "skategm_bingo_small", w / 2, h * 0.08, color_white)
 		return
 	elseif st.phase == "countdown" then
 		Text(tostring(math.max(1, math.ceil(left))), "skategm_bingo_big", w / 2, h * 0.3, GOLD)
@@ -180,7 +184,9 @@ BINGO.mode:JoinInfo(function(st)
 	return { host = (host and IsValid(host)) and host:Nick() or "someone", phase = st.phase, joinable = me == nil and st.phase ~= "results", mine = C.IsHost(st), playing = me ~= nil }
 end)
 BINGO.mode:Host({
-	description = "same card for everyone: land tricks to tick squares",
+	useStart = false,
+	description = "land tricks to get three in a row",
+	about = "Everyone gets the same 3x3 card of tricks. Land a trick in a line to tick its square. The first to get three in a row wins.",
 	options = {
 		{ key = "time", label = "Time limit", type = "number", min = BINGO.TIME_MIN, max = BINGO.TIME_MAX, step = 30, default = BINGO.TIME_DEFAULT, format = BINGO.Clock },
 		{ key = "full", label = "To win", type = "choice", choices = { { false, "three in a row" }, { true, "the whole card" } }, default = false },

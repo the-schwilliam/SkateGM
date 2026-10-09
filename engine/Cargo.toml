@@ -1,7 +1,7 @@
 # Crates from SK8-ENGINE/skate-3-rust-engine (commit cb79689) that the skate
 # mode links. Built as path dependencies of the IW4L workspace.
 [workspace]
-members = ["crates/skate-core", "crates/skate-data", "crates/skate-net"]
+members = ["crates/skate-core", "crates/skate-data", "crates/skate-net", "crates/skate-audio", "crates/skate-audio-fma"]
 exclude = ["crates/skate-host"]
 resolver = "3"
 

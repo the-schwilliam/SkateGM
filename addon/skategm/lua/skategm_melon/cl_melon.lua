@@ -45,6 +45,12 @@ end
 
 local PLAYING = { countdown = true, playing = true }
 
+MELON.mode:Boundary(function(st)
+	local me = MELON.mode:Me(st)
+	if st.phase ~= "playing" or not (me and me.playing) or not st.area then return nil end
+	return { area = st.area, pos = st.startV, yaw = st.yaw, out = function() Send({ cmd = "outside" }) end }
+end)
+
 ---------------------------------------------------------------------------
 -- following the server
 ---------------------------------------------------------------------------
@@ -67,9 +73,7 @@ function C.OnState(st, now)
 	C.state, C.stateAt = st, now
 	st.startV = st.start and Vector(st.start[1], st.start[2], st.start[3]) or nil
 	local me, a = C.Me(st), API()
-	if a and a.SetPlayerCollision then
-		if me and PLAYING[st.phase] then a.SetPlayerCollision(false) else a.SetPlayerCollision(nil) end
-	end
+	MELON.mode:NoCollide(me and PLAYING[st.phase])
 	C.SetTrail(st.phase == "playing" and st.king or nil)
 	if st.king ~= prev.king then C.bailSent = nil end
 	C.kingAt = st.king and (now - (st.kingFor or 0)) or nil
@@ -162,7 +166,7 @@ function C.DrawWorld()
 	if st.phase ~= "playing" then return end
 	glow = glow or (Material and Material("sprites/light_glow02_add"))
 	if st.king then
-		local pos = C.SkaterOf(st.king)
+		local pos = SKATEGM_MODES.DrawnHips(st.king) or C.SkaterOf(st.king)
 		local m = pos and C.CrownMelon()
 		if m then
 			m:SetPos(pos + Vector(0, 0, 44 + 3 * math.sin(now * 3)))
@@ -208,15 +212,13 @@ function C.Standings(st, now)
 end
 
 function C.Paint(w, h, now)
+	if SKATEGM_MODES.HudHidden() then return end
 	local st = C.state
 	if st.phase == "idle" then return end
 	Fonts()
 	local me = C.Me(st)
 	local since = now - (C.stateAt or now)
 	if st.phase == "lobby" then
-		Text("MELON KING", "skategm_melon_mid", w / 2, h * 0.04, GREEN)
-		local line = C.IsHost(st) and "you're the host: LB + D-pad left to start" or (me and "waiting for the host to start" or "LB + D-pad left to join")
-		Text(line, "skategm_melon_small", w / 2, h * 0.04 + h * 0.035, color_white)
 		return
 	end
 	if st.phase == "countdown" then
@@ -253,11 +255,11 @@ local cvTarget = CreateClientConVar("skategm_melon_pref_target", tostring(MELON.
 local cvArea = CreateClientConVar("skategm_melon_pref_area", tostring(MELON.AREA_DEFAULT), true, false, "Melon King: play area radius (units), in games you host", MELON.AREA_MIN, MELON.AREA_MAX)
 local function Num(cv, default) local v = cv.GetInt and cv:GetInt() or tonumber(cv:GetString()) return v or default end
 
-function C.Create(centre, radius, target)
+function C.Create(centre, radius, target, items)
 	local p = Here()
 	local c = centre or p
 	Send({ cmd = "create", pos = { p.x, p.y, p.z }, centre = { c.x, c.y, c.z }, yaw = LocalPlayer():EyeAngles().y,
-		radius = radius or Num(cvArea, MELON.AREA_DEFAULT), target = target or Num(cvTarget, MELON.TARGET_DEFAULT), canSkate = CanSkate() })
+		radius = radius or Num(cvArea, MELON.AREA_DEFAULT), target = target or Num(cvTarget, MELON.TARGET_DEFAULT), items = items == true, canSkate = CanSkate() })
 end
 function C.Settings(target, radius) Send({ cmd = "settings", target = target or Num(cvTarget, MELON.TARGET_DEFAULT), radius = radius or Num(cvArea, MELON.AREA_DEFAULT) }) end
 
@@ -274,10 +276,12 @@ local CHAT = { create = "skategm_melon_create", join = "skategm_melon_join", lea
 C.Chat = MELON.mode:ChatCommands(CHAT, "create, join, leave, start, stop, target N, area N")
 
 MELON.mode:Host({
-	description = "hold the melon the longest; skate into the King to take it",
+	description = "hold the melon the longest",
+	about = "A watermelon drops in the arena. Grab it, and whoever has it is the King. Skate into the King to steal it, and bailing drops it. Whoever holds it longest wins.",
 	options = {
 		{ key = "area", label = "Play area", type = "region", min = MELON.AREA_MIN, max = MELON.AREA_MAX, step = 128, default = MELON.AREA_DEFAULT, format = function(v) return (v * 2) .. " units across" end },
 		{ key = "target", label = "Time to win", type = "number", min = MELON.TARGET_MIN, max = MELON.TARGET_MAX, step = 5, default = MELON.TARGET_DEFAULT, format = function(v) return v .. " s" end },
+		{ key = "items", label = "Items", type = "bool", default = true },
 	},
-	start = function(v) C.Create(v.area.centre, v.area.radius, v.target) end,
+	start = function(v) C.Create(v.area.centre, v.area.radius, v.target, v.items) end,
 })

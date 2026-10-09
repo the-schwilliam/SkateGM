@@ -15,6 +15,8 @@
 
 pub mod coords;
 mod engine;
+#[cfg(feature = "engine")]
+pub mod hud; // gm_sk8 addition: Skate 3's own trick display
 #[cfg_attr(not(feature = "engine"), allow(dead_code))]
 mod pad;
 mod picker;
@@ -47,6 +49,7 @@ enum Job {
     Checkpoint,
     /// add this velocity (skate space, m/s): the testing boost
     Push([f32; 3]),
+    Wipeout,
     /// into the ragdoll with this momentum (skate space)
     Activate { spawn: [f32; 3], heading: f32 },
     Step { dt: f32, pad: bool, controls: Controls },
@@ -406,6 +409,10 @@ fn worker(
         // simulated) until collision covering it is in
         let mut installed: Option<(Vec3, f32)> = Some((centre, first_stats.half));
         let mut hold: Option<([f32; 3], f32, Instant)> = None;
+        // gm_sk8: a build that came in mid-grind waits for the grind to end
+        // (a new region's rails replace the one under the board, and the
+        // skater fell off a long rail halfway); at most a few seconds
+        let mut deferred: Option<(Prepared, Option<(Vec3, f32)>, Instant)> = None;
         let mut paused: Option<Instant> = None;
         let mut last_here = centre;
         let mut recoveries: Vec<Instant> = Vec::new();
@@ -422,6 +429,7 @@ fn worker(
                 Job::Push(dv) => {
                     let _ = sim.push(dv);
                 }
+                Job::Wipeout => sim.force_wipeout(),
                 Job::Moving(tris, c) => {
                     carriers = c;
                     match sim.set_moving(tris) {
@@ -478,6 +486,7 @@ fn worker(
                             Ok(Job::Push(dv)) => {
                                 let _ = sim.push(dv);
                             }
+                            Ok(Job::Wipeout) => sim.force_wipeout(),
                             Ok(Job::Activate { spawn, heading }) => {
                                 last_spawn = spawn;
                                 last_heading = heading;
@@ -512,7 +521,20 @@ fn worker(
                         covering = Some((c, h));
                     }
                     if let Some(p) = newest {
-                        sim.install(p)?;
+                        let since = deferred.take().map_or_else(Instant::now, |d| d.2);
+                        deferred = Some((p, covering.take(), since));
+                    } else if let (Some(d), Some(c)) = (deferred.as_mut(), covering) {
+                        d.1 = Some(c);
+                        covering = None;
+                    }
+                    let grinding = !cleanup::off("grinddefer") && sim.last_state().contains("Grind");
+                    if deferred.as_ref().is_some_and(|d| !grinding || d.2.elapsed() > std::time::Duration::from_secs(6)) {
+                        if let Some((p, c, _)) = deferred.take() {
+                            sim.install(p)?;
+                            if c.is_some() {
+                                installed = c;
+                            }
+                        }
                     }
                     if covering.is_some() {
                         installed = covering;
@@ -811,6 +833,26 @@ fn drain(host: &mut Host) {
             }
             Ok(Reply::Stepped { pose, ticks, micros, pad, pad_state }) => {
                 if let Some(p) = pose {
+                    // Skate 3's own trick display runs a frame per engine tick
+                    #[cfg(feature = "engine")]
+                    {
+                        let s = &p.score;
+                        hud::feed(p.tick, &hud::Feed {
+                            sequence_score: s.sequence,
+                            line_score: s.line,
+                            sequence_timer: s.sequence_timer,
+                            line_time: s.line_time,
+                            line_capacity: s.hud_line_capacity,
+                            multiplier: s.multiplier,
+                            clean: s.clean,
+                            sketchy: s.sketchy,
+                            stance: s.stance,
+                            trick_name: s.trick_label.clone(),
+                            new_trick: s.new_trick,
+                            modified_trick: s.modified_trick,
+                            close_tricks: s.close_tricks,
+                        });
+                    }
                     host.pose = Some(p);
                 }
                 host.pad = pad;
@@ -1141,6 +1183,27 @@ unsafe extern "C" fn set_marker_blocked(l: State) -> c_int {
     })
 }
 
+/// skategm.SetBoardFriction(units per second^2): slows a board nobody rides
+/// (after a bail, on foot) along the ground; 0 = the game's own rolling.
+unsafe extern "C" fn set_board_friction(l: State) -> c_int {
+    guarded(l, |lua| {
+        let v = lua.number(1, 0.0) as f32 * coords::metres_per_unit();
+        let v = if v.is_finite() { v.max(0.0) } else { 0.0 };
+        engine::BOARD_FRICTION.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        lua.push_bool(true);
+        1
+    })
+}
+
+/// skategm.SetButtonMask(bits): XInput buttons the engine doesn't see.
+unsafe extern "C" fn set_button_mask(l: State) -> c_int {
+    guarded(l, |lua| {
+        engine::MASKED_BUTTONS.store(lua.number(1, 0.0) as u16, std::sync::atomic::Ordering::Relaxed);
+        lua.push_bool(true);
+        1
+    })
+}
+
 unsafe extern "C" fn set_frozen(l: State) -> c_int {
     guarded(l, |lua| {
         FROZEN.store(lua.number(1, 0.0) != 0.0, std::sync::atomic::Ordering::Relaxed);
@@ -1261,6 +1324,7 @@ unsafe extern "C" fn poll(l: State) -> c_int {
             // Skate 3's own English name when we have the language table
             let name = h.language.get(sc.trick.trim()).cloned().unwrap_or_else(|| sc.trick.clone());
             lua.field_str("trick", &name);
+            lua.field_num("tricksNamed", f64::from(sc.tricks_named));
             lua.set("score");
             let m = &p.marker;
             lua.new_table(0, 5);
@@ -1289,6 +1353,11 @@ unsafe extern "C" fn poll(l: State) -> c_int {
         if let Some(p) = &h.pose {
             lua.field_num("tick", p.tick as f64);
             lua.field_str("state", &p.state);
+            for (i, name) in ["audioWheel0", "audioWheel1", "audioWheel2", "audioWheel3", "audioGrind"].iter().enumerate() {
+                lua.field_num(name, f64::from(p.audio[i]));
+            }
+            lua.field_bool("christAir", p.christ_air);
+            lua.field_bool("bodyFlip", p.body_flip);
             lua.field_vec("pos", coords::from_skate(col(&p.root, 3)));
             lua.field_vec("axisX", coords::dir_from_skate(col(&p.root, 0)));
             lua.field_vec("axisY", coords::dir_from_skate(col(&p.root, 1)));
@@ -1618,9 +1687,182 @@ unsafe extern "C" fn set_air_dismount_block(l: State) -> c_int {
     })
 }
 
+/// skategm.SetAirReset(seconds): how long in the air before the engine sends
+/// the skater back to a checkpoint (retail 5; 0 = never).
+unsafe extern "C" fn set_air_reset(l: State) -> c_int {
+    guarded(l, |lua| {
+        engine::set_air_reset(lua.number(1, 30.0) as f32);
+        lua.push_bool(true);
+        1
+    })
+}
+
+/// skategm.SetStyle(regular, style, posture, up, down, left, right): the
+/// skater's natural stance (1 regular, 0 goofy), animation style ("" standard,
+/// "Loose", "Gonzo", "Aggressive", "MikeCarroll", ...), posture (0-3) and the
+/// D-pad gestures (0-36 each). Applied before the next step, and kept for
+/// later sessions.
+unsafe extern "C" fn set_style(l: State) -> c_int {
+    guarded(l, |lua| {
+        let g = |i: i32, d: f64| (lua.number(i, d).max(0.0) as u32).min(36);
+        engine::set_style(engine::Style {
+            natural: u32::from(lua.number(1, 1.0) != 0.0),
+            style: lua.string(2).unwrap_or_default().chars().filter(char::is_ascii_alphanumeric).take(31).collect(),
+            posture: (lua.number(3, 0.0).max(0.0) as u32).min(3),
+            gestures: [g(4, 0.0), g(5, 1.0), g(6, 2.0), g(7, 3.0)],
+        });
+        lua.push_bool(true);
+        1
+    })
+}
+
+/// skategm.SetDifficulty(index): Skate 3's difficulty, 0 easy, 1 normal,
+/// 2 hardcore (the game's own physics_mode tables). Kept for later sessions.
+unsafe extern "C" fn set_difficulty(l: State) -> c_int {
+    guarded(l, |lua| {
+        let d = (lua.number(1, 0.0).max(0.0) as u32).min(2);
+        engine::DIFFICULTY.store(d, std::sync::atomic::Ordering::Relaxed);
+        lua.push_bool(true);
+        1
+    })
+}
+
+/// skategm.Punch([seconds]): swing Skate 3's shove straight ahead (riding on
+/// the ground or on foot), held this long (default 0.35 s). Returns whether
+/// the last punch could start (it's taken by the next step).
+unsafe extern "C" fn punch(l: State) -> c_int {
+    guarded(l, |lua| {
+        let ticks = (lua.number(1, 0.35).clamp(0.05, 2.0) * 60.0) as u32;
+        engine::PUNCH.store(ticks.max(1), std::sync::atomic::Ordering::Relaxed);
+        lua.push_bool(engine::PUNCH_OK.load(std::sync::atomic::Ordering::Relaxed));
+        1
+    })
+}
+
+/// skategm.KnockDown(vx, vy, vz): knock the skater into a bail with this
+/// velocity (map units per second, Source axes): hit by another player.
+unsafe extern "C" fn knock_down(l: State) -> c_int {
+    guarded(l, |lua| {
+        let v = [lua.number(1, 0.0) as f32, lua.number(2, 0.0) as f32, lua.number(3, 0.0) as f32];
+        let dv = coords::to_skate(v);
+        let ok = dv.iter().all(|x| x.is_finite());
+        if ok {
+            *engine::KNOCK.lock().unwrap_or_else(|e| e.into_inner()) = Some(dv);
+        }
+        lua.push_bool(ok);
+        1
+    })
+}
+
+/// skategm.HudLoad(folder) -> true | false, error: Skate 3's own trick display,
+/// from a folder prepared by SK8-ENGINE/skate-3-rust-engine's
+/// tools/prepare_hud.py (it reads runtime/trickdisplay.json).
+unsafe extern "C" fn hud_load(l: State) -> c_int {
+    guarded(l, |lua| {
+        #[cfg(feature = "engine")]
+        {
+            let path = lua.string(1).unwrap_or_default();
+            match hud::load(std::path::Path::new(&path)) {
+                Ok(()) => {
+                    lua.push_bool(true);
+                    1
+                }
+                Err(e) => fail(lua, &e),
+            }
+        }
+        #[cfg(not(feature = "engine"))]
+        {
+            fail(lua, "built without the engine")
+        }
+    })
+}
+
+/// skategm.HudDraws() -> { { tex, mul = {r,g,b,a}, add = {r,g,b,a}, v = { x,y,u,v, ... } }, ... }
+/// in the movie's 1280x720 space, three vertices per triangle; or nil, error.
+unsafe extern "C" fn hud_draws(l: State) -> c_int {
+    guarded(l, |lua| {
+        #[cfg(feature = "engine")]
+        {
+            let guard = hud::HUD.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(s) = guard.as_ref() else { return fail(lua, "the trick display isn't loaded") };
+            if let Some(e) = &s.failed {
+                return fail(lua, e);
+            }
+            let draws = match hud::apt_scene::draw(&s.runtime.bindings.movie, &s.runtime.vm, &s.shapes) {
+                Ok(d) => d,
+                Err(e) => return fail(lua, &e),
+            };
+            lua.new_table(draws.len() as i32, 0);
+            for (i, d) in draws.iter().enumerate() {
+                lua.new_table(0, 5);
+                lua.field_str("tex", &d.texture);
+                lua.field_num("mask", f64::from(d.mask));
+                for (name, c) in [("mul", d.multiply), ("add", d.add)] {
+                    lua.new_table(4, 0);
+                    for (k, v) in c.iter().enumerate() {
+                        lua.push_number(f64::from(*v));
+                        lua.seti(k as i32 + 1);
+                    }
+                    lua.set(name);
+                }
+                lua.new_table((d.vertices.len() * 4) as i32, 0);
+                for (k, v) in d.vertices.iter().enumerate() {
+                    for (j, x) in [v.position[0], v.position[1], v.uv[0], v.uv[1]].iter().enumerate() {
+                        lua.push_number(f64::from(*x));
+                        lua.seti((k * 4 + j) as i32 + 1);
+                    }
+                }
+                lua.set("v");
+                // a text field: its string and box (corners x,y ×4), for other fonts
+                if let Some(t) = &d.text {
+                    lua.field_str("text", &t.value);
+                    lua.field_num("th", f64::from(t.height));
+                    lua.field_num("talign", f64::from(t.alignment));
+                    lua.field_num("tshadow", if t.shadow { 1.0 } else { 0.0 });
+                    lua.new_table(8, 0);
+                    for (k, x) in t.corners.iter().flatten().enumerate() {
+                        lua.push_number(f64::from(*x));
+                        lua.seti(k as i32 + 1);
+                    }
+                    lua.set("tbox");
+                }
+                lua.seti(i as i32 + 1);
+            }
+            1
+        }
+        #[cfg(not(feature = "engine"))]
+        {
+            fail(lua, "built without the engine")
+        }
+    })
+}
+
+/// skategm.SetLandingSettle(seconds): how long a landing must hold before its
+/// trick sequence is banked (a bail or run-out within it loses the sequence).
+unsafe extern "C" fn set_landing_settle(l: State) -> c_int {
+    guarded(l, |lua| {
+        #[cfg(feature = "engine")]
+        skate_host::scoring_runtime::LANDING_SETTLE_MS.store(
+            (lua.number(1, 0.25).clamp(0.0, 3.0) * 1000.0) as u32,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        lua.push_bool(true);
+        1
+    })
+}
+
 unsafe extern "C" fn set_camera_shake(l: State) -> c_int {
     guarded(l, |lua| {
         engine::set_camera_shake(lua.number(1, 1.0) != 0.0);
+        lua.push_bool(true);
+        1
+    })
+}
+
+/// skategm.SetCameraType(0 low | 1 high): Skate 3's two stock camera graphs.
+unsafe extern "C" fn set_camera_type(l: State) -> c_int {
+    guarded(l, |lua| {
+        engine::set_camera_type(if lua.number(1, 1.0) == 0.0 { 0 } else { 1 });
         lua.push_bool(true);
         1
     })
@@ -1639,6 +1881,15 @@ unsafe extern "C" fn set_speed_limit(l: State) -> c_int {
 /// skategm.Push(vx, vy, vz): add this velocity to the skater (map units per
 /// second, Source axes) - a boost for testing ramps without building speed.
 /// Only while riding or in the air.
+/// skategm.Wipeout(): knock my skater off the board (a minigame item's hit).
+unsafe extern "C" fn wipeout(l: State) -> c_int {
+    guarded(l, |lua| {
+        let ok = host().as_ref().is_some_and(|h| h.jobs.send(Job::Wipeout).is_ok());
+        lua.push_bool(ok);
+        1
+    })
+}
+
 unsafe extern "C" fn push(l: State) -> c_int {
     guarded(l, |lua| {
         let v = [lua.number(1, 0.0) as f32, lua.number(2, 0.0) as f32, lua.number(3, 0.0) as f32];
@@ -1878,12 +2129,24 @@ pub unsafe extern "C" fn gmod13_open(l: State) -> c_int {
         ("StaticPropsNear", static_props_near),
         ("Diagnose", diagnose),
         ("Push", push),
+        ("Wipeout", wipeout),
         ("SetTuning", set_tuning),
         ("SetSpeedLimit", set_speed_limit),
         ("SetAirDismountBlock", set_air_dismount_block),
         ("SetCameraShake", set_camera_shake),
+        ("SetCameraType", set_camera_type),
+        ("SetStyle", set_style),
+        ("SetDifficulty", set_difficulty),
+        ("Punch", punch),
+        ("SetLandingSettle", set_landing_settle),
+        ("HudLoad", hud_load),
+        ("HudDraws", hud_draws),
+        ("KnockDown", knock_down),
         ("SetInputBlocked", set_input_blocked),
         ("SetMarkerBlocked", set_marker_blocked),
+        ("SetButtonMask", set_button_mask),
+        ("SetAirReset", set_air_reset),
+        ("SetBoardFriction", set_board_friction),
         ("PickImage", pick_image),
         ("PickedImage", picked_image),
         ("OpenFolder", open_folder),

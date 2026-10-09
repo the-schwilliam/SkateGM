@@ -18,7 +18,7 @@ def _imports():
             sys.path.insert(0, str(path))
 
 
-AHEAD = 64
+AHEAD = 16
 
 
 def _worker_init(paths):
@@ -27,9 +27,21 @@ def _worker_init(paths):
             sys.path.insert(0, path)
 
 
+# (the vendored parser turns any decode error - a MemoryError too - into a
+# warning and drops the texture: on a PC short of memory a texture went
+# missing and its map differed from everyone else's. A failed decode is
+# tried again, and if it keeps failing the build stops)
 def _parse_texture(data):
+    import gc
     import rx2_parser
-    return rx2_parser.parse_rx2(data)
+    warnings = []
+    for _ in range(3):
+        parsed = rx2_parser.parse_rx2(data)
+        warnings = [w for w in getattr(parsed, 'warnings', []) if 'decode failed' in w]
+        if not warnings:
+            return parsed
+        gc.collect()
+    raise RuntimeError('a texture would not decode: ' + '; '.join(warnings))
 
 
 def _parse_collision(data):
@@ -56,9 +68,20 @@ class Ahead:
         future = queue.pop(0)
         if not queue:
             del self.pending[id(data)]
-        result = future.result()
+        try:
+            result = future.result()
+        except Exception:
+            result = self.fn(data)
         self._fill()
         return result
+
+
+def _parse_texture_with(parse, data):
+    for _ in range(3):
+        parsed = parse(data)
+        if not any('decode failed' in w for w in getattr(parsed, 'warnings', [])):
+            return parsed
+    raise RuntimeError('a texture would not decode: ' + '; '.join(parsed.warnings))
 
 
 def _parallel_prepare(prepare, folder, stream, workers, **kwargs):
@@ -75,7 +98,7 @@ def _parallel_prepare(prepare, folder, stream, workers, **kwargs):
     with ProcessPoolExecutor(max_workers=workers or os.cpu_count(), initializer=_worker_init, initargs=(list(sys.path),)) as pool:
         tex, col = Ahead(pool, _parse_texture, textures), Ahead(pool, _parse_collision, sims)
         phd.load_district_stream = lambda directory, name, district: assets[name] if name in assets else real_load(directory, name, district)
-        rx2_parser.parse_rx2 = lambda data: tex.get(data, real_parse)
+        rx2_parser.parse_rx2 = lambda data: tex.get(data, lambda d: _parse_texture_with(real_parse, d))
         phd.decode_rx2_clustered_meshes = lambda data: col.get(data, real_collision)
         try:
             return prepare(**kwargs)

@@ -19,6 +19,7 @@ impl PhysicalStateCalls for Calls {
                     PhysicalStateId::Sleeping
                         | PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
+                        | PhysicalStateId::PhysicsAirSecondary
                         | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
@@ -40,6 +41,7 @@ impl PhysicalStateCalls for Calls {
                     call.state.state,
                     PhysicalStateId::PhysicsGround
                         | PhysicalStateId::PhysicsAir
+                        | PhysicalStateId::PhysicsAirSecondary
                         | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                         | PhysicalStateId::KnownAir
                         | PhysicalStateId::BipedAir
@@ -162,6 +164,9 @@ pub(super) fn set(
         PhysicalStateId::Boneless => {}, //empty82D4C9B4
         PhysicalStateId::PhysicsGround => super::super::ground_exit::exit(physics, skater),
         PhysicalStateId::PhysicsAir => super::super::air_phase::exit(skater),
+        // gm_sk8 addition: GrindTrick202 (a flip out of a darkslide), ported
+        // from SK8-ENGINE/skate-3-rust-engine.
+        PhysicalStateId::PhysicsAirSecondary => super::super::grind_trick::exit(physics),
         PhysicalStateId::KnownAir => {
             super::super::known_air::exit(physics, skater, requested as u32)?
         }
@@ -185,6 +190,7 @@ pub(super) fn set(
         PhysicalStateId::Boneless => super::super::boneless::enter(physics, skater),
         PhysicalStateId::PhysicsGround => super::super::ground_phase::enter(physics, skater),
         PhysicalStateId::PhysicsAir => super::super::air_phase::enter(physics, skater),
+        PhysicalStateId::PhysicsAirSecondary => super::super::grind_trick::enter(physics, skater),
         PhysicalStateId::KnownAir => super::super::known_air::enter(physics, skater),
         PhysicalStateId::BipedAir => super::super::biped_air::enter(physics, skater),
         PhysicalStateId::BipedGround => super::super::biped_ground::enter(physics, skater),

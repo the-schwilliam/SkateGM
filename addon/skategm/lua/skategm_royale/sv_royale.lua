@@ -30,7 +30,7 @@ local function Public(now)
 	local t = { phase = G.phase }
 	if G.phase == "idle" then return t end
 	t.host = IsValid(G.host) and G.host:EntIndex() or 0
-	t.start, t.yaw, t.runTime, t.round = G.start, G.yaw or 0, G.runTime, G.round or 0
+	t.start, t.yaw, t.runTime, t.round, t.bailEnds = G.start, G.yaw or 0, G.runTime, G.round or 0, G.bailEnds
 	t.timeLeft = G.deadline and math.max(0, G.deadline - now) or 0
 	if G.phase == "replays" and G.order then
 		local cur = G.order[G.replayIndex]
@@ -39,7 +39,7 @@ local function Public(now)
 	t.players = {}
 	for _, p in ipairs(G.players) do
 		local e = G.entries[Key(p)]
-		t.players[#t.players + 1] = { ent = p:EntIndex(), name = p:Nick(), inMatch = e.inMatch, out = e.out, voted = G.votes and G.votes[p:EntIndex()] ~= nil or nil, score = e.score }
+		t.players[#t.players + 1] = { ent = p:EntIndex(), name = p:Nick(), inMatch = e.inMatch, out = e.out, done = e.done, voted = G.votes and G.votes[p:EntIndex()] ~= nil or nil, score = e.score }
 	end
 	t.knocked = G.knocked
 	t.winner = G.winner
@@ -66,7 +66,7 @@ ROYALE.Stop = Stop
 local function ToLobby(now)
 	G.phase, G.deadline, G.winner, G.knocked, G.votes, G.order, G.round = "lobby", nil, nil, nil, nil, nil, 0
 	for key, e in pairs(G.entries) do
-		if e.left then G.entries[key] = nil else e.inMatch, e.out, e.score = nil, nil, nil end
+		if e.left then G.entries[key] = nil else e.inMatch, e.out, e.score, e.done = nil, nil, nil, nil end
 	end
 	Broadcast(now)
 end
@@ -82,14 +82,13 @@ end
 local function Countdown(now)
 	G.round = (G.round or 0) + 1
 	G.phase, G.deadline, G.knocked, G.votes, G.order = "countdown", now + ROYALE.COUNTDOWN, nil, nil, nil
-	for _, p in ipairs(AlivePlayers()) do G.entries[Key(p)].score = nil end
+	for _, p in ipairs(AlivePlayers()) do G.entries[Key(p)].score, G.entries[Key(p)].done = nil, nil end
 	Broadcast(now)
 end
 
 local function Run(now)
 	G.phase, G.deadline = "running", now + G.runTime
 	Broadcast(now)
-	Tell(nil, string.format("round %d: GO! You have %d seconds", G.round, G.runTime))
 end
 
 local function Replays(now)
@@ -187,8 +186,25 @@ function ROYALE.Vote(ply, target, now)
 	return true
 end
 
+function ROYALE.Bailed(ply, score, now)
+	if not G.bailEnds or G.phase ~= "running" or not Alive(ply) then return false end
+	local e = G.entries[Key(ply)]
+	if e.done then return false end
+	ROYALE.Score(ply, score, now)
+	e.done = true
+	local all = true
+	for _, p in ipairs(AlivePlayers()) do if not G.entries[Key(p)].done then all = false end end
+	if all then
+		Tell(nil, "everyone's bailed: replays")
+		G.deadline = now
+	end
+	Broadcast(now)
+	return true
+end
+
 function ROYALE.Score(ply, score, now)
 	if not Alive(ply) or (G.phase ~= "running" and G.phase ~= "replays") then return false end
+	if G.entries[Key(ply)].done and G.entries[Key(ply)].score ~= nil then return false end
 	score = tonumber(score)
 	if not score or score ~= score then return false end
 	G.entries[Key(ply)].score = math.Clamp(math.floor(score), 0, 99999999)
@@ -207,19 +223,18 @@ function ROYALE.Command(ply, m, now)
 	if not ROYALE.Allowed() and cmd ~= "leave" then return Tell(ply, "Run Royale is turned off on this server") end
 	if cmd == "create" then
 		if G.phase ~= "idle" then return Tell(ply, "a game is already set up: join it") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working (the module and your data) to host") end
+		if ROYALE.mode:CantSkate(ply, m, "host") then return end
 		local p = Vec(m.pos)
 		if not p then return end
 		G.phase, G.host, G.players, G.entries, G.keys, G.round = "lobby", ply, {}, {}, {}, 0
 		G.start, G.yaw = p, math.NormalizeAngle(tonumber(m.yaw) or 0)
 		G.runTime = ROYALE.ClampRun(m.runTime)
+		G.bailEnds = m.bailEnds ~= false
 		AddPlayer(ply, now)
 		Tell(nil, ply:Nick() .. " is hosting Run Royale: join with LB + D-pad left")
 	elseif cmd == "join" then
 		if G.phase ~= "lobby" then return Tell(ply, G.phase == "idle" and "no game set up: !royale create starts one" or "a game is on: wait for the next one") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working (the module and your data) to play") end
+		if ROYALE.mode:CantSkate(ply, m, "play") then return end
 		AddPlayer(ply, now)
 	elseif cmd == "leave" then
 		RemovePlayer(ply, now)
@@ -241,6 +256,8 @@ function ROYALE.Command(ply, m, now)
 		ROYALE.Vote(ply, m.target, now)
 	elseif cmd == "score" then
 		ROYALE.Score(ply, m.score, now)
+	elseif cmd == "bailed" then
+		ROYALE.Bailed(ply, m.score, now)
 	end
 end
 

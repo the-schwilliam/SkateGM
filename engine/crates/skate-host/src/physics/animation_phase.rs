@@ -193,10 +193,15 @@ pub(crate) fn advance(
         });
     //Original ProcessOutput82DB7E38. Probe+72 is copied to Processed1848;
     //Ground240 resets to zero and receives this point only on an interaction.
-    let interaction_trigger = matches!(p.category_2512, 100 | 500)
-        && p.probe_1792.bytes_72_73[0] != 0
-        && p.flags_2476 & 0x400000 != 0;
-    let direction = if interaction_trigger {
+    let native_trigger = p.probe_1792.bytes_72_73[0] != 0 && p.flags_2476 & 0x400000 != 0;
+    // gm_sk8 addition: the host can start a shove (RB punch) with no
+    // pedestrian probe hit - Garry's Mod has no pedestrians - straight ahead.
+    let forced = skater.forced_shove > 0;
+    skater.forced_shove = skater.forced_shove.saturating_sub(1);
+    let interaction_trigger = matches!(p.category_2512, 100 | 500) && (native_trigger || forced);
+    let direction = if interaction_trigger && !native_trigger {
+        [0.0, 0.0, 1.0, 0.0]
+    } else if interaction_trigger {
         let source = if p.flags_2484 & 0x40000 != 0 { 0 } else { 1 };
         let point = p.probe_1792.vectors_16_32_48[source].map(f32::from_bits);
         let inverse = skater.animated_skeleton.roots.world_to_animation;

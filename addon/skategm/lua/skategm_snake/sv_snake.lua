@@ -169,8 +169,7 @@ function SNAKE.Command(ply, m, now)
 	if not SNAKE.Allowed() and cmd ~= "leave" then return Tell(ply, "Snake is turned off on this server") end
 	if cmd == "create" then
 		if G.phase ~= "idle" then return Tell(ply, "a game is already set up: join it") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working to host") end
+		if SNAKE.mode:CantSkate(ply, m, "host") then return end
 		local x, y, z = Num(m.x), Num(m.y), Num(m.z)
 		if not (x and y and z) then return end
 		G.phase, G.host, G.players, G.entries = "lobby", ply, {}, {}
@@ -181,8 +180,7 @@ function SNAKE.Command(ply, m, now)
 		Tell(nil, ply:Nick() .. " is hosting Snake: join with LB + D-pad left")
 	elseif cmd == "join" then
 		if G.phase ~= "lobby" then return Tell(ply, G.phase == "idle" and "no game set up" or "a game is on: wait for the next one") end
-		if not Allowed(ply) then return Tell(ply, "you're not allowed to skate on this server") end
-		if not m.canSkate then return Tell(ply, "you need Skater mode working to play") end
+		if SNAKE.mode:CantSkate(ply, m, "play") then return end
 		AddPlayer(ply, now)
 	elseif cmd == "leave" then
 		RemovePlayer(ply, now)

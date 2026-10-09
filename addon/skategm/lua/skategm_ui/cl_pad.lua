@@ -18,7 +18,8 @@ UI.pad = PAD
 UI.combos = UI.combos or {}
 PAD.loaded = true
 
-PAD.B = { UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, START = 0x0010, LB = 0x0100, RB = 0x0200, A = 0x1000, B = 0x2000, X = 0x4000, Y = 0x8000 }
+PAD.B = { UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, START = 0x0010, LB = 0x0100, RB = 0x0200, A = 0x1000, B = 0x2000, X = 0x4000, Y = 0x8000, RT = 0x10000 }
+PAD.TRIGGER_PRESS = 0.6
 local B = PAD.B
 PAD.DEADZONE = 0.2
 PAD.REPEAT_DELAY, PAD.REPEAT_RATE = 0.35, 0.09
@@ -28,6 +29,10 @@ function PAD.API() return SkateGM and SkateGM.API end
 function PAD.Pad() local a = PAD.API() return a and a.Pad and a.Pad() end
 function PAD.Dead(v) if math.abs(v or 0) < PAD.DEADZONE then return 0 end return v end
 function PAD.Held(pad, b) return bit.band(pad.buttons or 0, b) ~= 0 end
+function PAD.WithTrigger(pad)
+	if (pad.rt or 0) < PAD.TRIGGER_PRESS then return pad end
+	return setmetatable({ buttons = bit.bor(pad.buttons or 0, B.RT) }, { __index = pad })
+end
 
 -- presses (with repeat on the D-pad) for whoever feeds it: w:Feed(pad, now,
 -- fn, repeating) calls fn(button, buttons) for each new press
@@ -72,12 +77,22 @@ function UI.Take(name, screen, view, keepSkater)
 	UI.open, UI.screen = name, screen or {}
 	UI.screen.keepSkater = keepSkater
 	if a then
-		if a.Freeze and not keepSkater then a.Freeze(true) end
-		if a.BlockInput then a.BlockInput(true) end
-		if a.SetView then a.SetView(view) end
+		-- (frozen only in free skate: in a minigame the game goes on around you)
+		UI.screen.froze = not keepSkater and not UI.InMinigame()
+		if a.Freeze then a.Freeze(UI.screen.froze, "ui") end
+		if a.SetInMenu then a.SetInMenu(UI.screen.froze) end
+		if a.BlockInput then a.BlockInput(true, "ui") end
+		if a.SetView then a.SetView(view, "ui") end
 	end
 	local pad = PAD.Pad()
 	if pad then UI.watch:Prime(pad, RealTime()) end
+end
+
+-- watching someone (the minigame spectator): its camera stays, and only the
+-- combos marked whileWatching open
+function UI.Watching()
+	local SP = SKATEGM_MODES and SKATEGM_MODES.spectate
+	return SP ~= nil and SP.on == true
 end
 
 -- (only the screen that's open gives it back)
@@ -87,9 +102,10 @@ function UI.Give(name)
 	local keep = UI.screen and UI.screen.keepSkater
 	UI.open, UI.screen = nil, nil
 	if a then
-		if a.SetView then a.SetView(nil) end
-		if a.BlockInput then a.BlockInput(false) end
-		if a.Freeze and not keep then a.Freeze(false) end
+		if a.SetView then a.SetView(nil, "ui") end
+		if a.BlockInput then a.BlockInput(false, "ui") end
+		if a.Freeze then a.Freeze(false, "ui") end
+		if a.SetInMenu then a.SetInMenu(false) end
 	end
 	local pad = PAD.Pad()
 	if pad then UI.watch:Prime(pad, RealTime()) end
@@ -100,12 +116,12 @@ end
 function UI.Combo(button, def) UI.combos[button] = def end
 
 -- the combos the LB overlay lists, in its order, when they're available
-UI.COMBO_ORDER = { B.RB, B.X, B.B, B.Y, B.A }
+UI.COMBO_ORDER = { B.RT, B.RB, B.X, B.B, B.Y, B.A }
 function UI.ComboHints()
 	local rows = {}
 	for _, b in ipairs(UI.COMBO_ORDER) do
 		local c = UI.combos[b]
-		if c and c.label and (not c.allowed or c.allowed()) then rows[#rows + 1] = { keys = { PAD.NAMES[b] }, text = c.label } end
+		if c and c.label and UI.ComboOpen(c) then rows[#rows + 1] = { keys = { PAD.NAMES[b] }, text = c.label } end
 	end
 	return rows
 end
@@ -120,11 +136,28 @@ function UI.Press(btn, buttons)
 	-- (LB + RB: whichever of the two came second)
 	local key = btn
 	if btn == B.LB and bit.band(buttons, B.RB) ~= 0 then key = B.RB end
+	if btn == B.LB and bit.band(buttons, B.RT) ~= 0 then key = B.RT end
 	local c = UI.combos[key]
-	if c and (not c.allowed or c.allowed()) then c.open() end
+	if c and UI.ComboOpen(c) then c.open() end
+end
+
+function UI.ComboOpen(c)
+	if UI.Watching() and not c.whileWatching then return false end
+	return not c.allowed or c.allowed()
+end
+
+function UI.InMinigame()
+	local M = SKATEGM_MODES
+	return M ~= nil and M.Playing ~= nil and M.Playing() == true
 end
 
 function UI.Think(now, dt)
+	if UI.open and UI.screen and UI.screen.froze and UI.InMinigame() then
+		UI.screen.froze = false
+		local a = PAD.API()
+		if a and a.Freeze then a.Freeze(false, "ui") end
+		if a and a.SetInMenu then a.SetInMenu(false) end
+	end
 	local pad = PAD.Pad()
 	if not pad then
 		if UI.open and UI.screen and UI.screen.close then UI.screen.close() end
@@ -133,7 +166,7 @@ function UI.Think(now, dt)
 		return
 	end
 	if UI.open and UI.screen and UI.screen.think then UI.screen.think(pad, now, dt) end
-	UI.watch:Feed(pad, now, UI.Press, UI.open ~= nil)
+	UI.watch:Feed(PAD.WithTrigger(pad), now, UI.Press, UI.open ~= nil)
 end
 
 -- a free camera: left stick flies, right stick looks, triggers down / up,
@@ -144,7 +177,8 @@ function UI.Fly(cam, pad, dt, speed, look, fast)
 	local move = fwd * PAD.Dead(pad.ly) + right * PAD.Dead(pad.lx) + Vector(0, 0, (pad.rt or 0) - (pad.lt or 0))
 	cam.pos = cam.pos + move * speed * f * dt
 	look = look or 140
-	cam.ang = Angle(math.Clamp(cam.ang.p - PAD.Dead(pad.ry) * look * 0.7 * dt, -89, 89), cam.ang.y - PAD.Dead(pad.rx) * look * dt, 0)
+	local pitch = (cam.ang.p + 180) % 360 - 180
+	cam.ang = Angle(math.Clamp(pitch - PAD.Dead(pad.ry) * look * 0.7 * dt, -89, 89), cam.ang.y - PAD.Dead(pad.rx) * look * dt, 0)
 end
 
 ---------------------------------------------------------------------------
@@ -205,7 +239,7 @@ function PAD.GlyphWidth(name, size)
 	local g = PAD.GLYPHS[name]
 	return g and (g[3] and size * 1.6 or size) or 0
 end
-PAD.NAMES = { [B.A] = "A", [B.B] = "B", [B.X] = "X", [B.Y] = "Y", [B.LB] = "LB", [B.RB] = "RB", [B.UP] = "UP", [B.DOWN] = "DOWN", [B.LEFT] = "LEFT", [B.RIGHT] = "RIGHT" }
+PAD.NAMES = { [B.A] = "A", [B.B] = "B", [B.X] = "X", [B.Y] = "Y", [B.LB] = "LB", [B.RB] = "RB", [B.UP] = "UP", [B.DOWN] = "DOWN", [B.LEFT] = "LEFT", [B.RIGHT] = "RIGHT", [B.RT] = "RT" }
 PAD.WHITE, PAD.DIM, PAD.GREY, PAD.BLUE = Color(255, 255, 255), Color(120, 120, 120), Color(170, 170, 170), Color(120, 220, 255)
 PAD.PANEL, PAD.SEL = Color(0, 0, 0, 190), Color(120, 220, 255, 60)
 local WHITE, DIM, GREY, BLUE, PANEL, SEL = PAD.WHITE, PAD.DIM, PAD.GREY, PAD.BLUE, PAD.PANEL, PAD.SEL
@@ -462,6 +496,8 @@ function List.Input(stack, btn)
 		if #stack == 0 then return "empty" end
 	elseif row and not row.disabled and row.actions and row.actions[btn] then
 		row.actions[btn]()
+	elseif page.actions and page.actions[btn] then
+		page.actions[btn]()
 	end
 end
 
@@ -486,6 +522,55 @@ end
 
 -- the page on top, as a panel on the left (opts.x, opts.width as fractions
 -- of the screen, opts.note = { text, t } under it), its hints at the bottom
+-- text cut to a width (with "..."), so a long description doesn't run into its row's name
+function List.Fit(text, font, width)
+	surface.SetFont(font)
+	if (surface.GetTextSize(text) or 0) <= width then return text end
+	local lo, hi = 0, #text
+	while lo < hi do
+		local mid = math.floor((lo + hi + 1) / 2)
+		if (surface.GetTextSize(text:sub(1, mid) .. "...") or 0) <= width then lo = mid else hi = mid - 1 end
+	end
+	return text:sub(1, lo):gsub("%s+$", "") .. "..."
+end
+
+-- a list longer than its box: where you are, a scrollbar, and "N more"
+-- above / below with an arrow, so it's clear there's more to see
+function List.ScrollInfo(first, visible, count)
+	return math.max(0, first - 1), math.max(0, count - (first + visible - 1))
+end
+
+local function Arrow(cx, cy, size, up, col)
+	draw.NoTexture()
+	surface.SetDrawColor(col.r, col.g, col.b, col.a or 255)
+	local s = size / 2
+	if up then
+		surface.DrawPoly({ { x = cx - s, y = cy + s * 0.6 }, { x = cx, y = cy - s * 0.6 }, { x = cx + s, y = cy + s * 0.6 } })
+	else
+		surface.DrawPoly({ { x = cx - s, y = cy - s * 0.6 }, { x = cx + s, y = cy - s * 0.6 }, { x = cx, y = cy + s * 0.6 } })
+	end
+end
+
+function List.Scroll(x, y, pw, rowH, h, first, visible, count, sel)
+	local above, below = List.ScrollInfo(first, visible, count)
+	local top, height = y - 3, visible * rowH
+	local bx = x + pw + 10
+	draw.RoundedBox(3, bx, top, 5, height, Color(255, 255, 255, 30))
+	local thumb = math.max(rowH * 0.6, height * visible / count)
+	local ty = top + (height - thumb) * ((first - 1) / math.max(1, count - visible))
+	draw.RoundedBox(3, bx, ty, 5, thumb, BLUE)
+	PAD.Text(string.format("%d / %d", sel, count), "skategm_ui_sub", x + pw, y - h * 0.05, GREY, TEXT_ALIGN_RIGHT)
+	local size = rowH * 0.32
+	if above > 0 then
+		Arrow(x + pw / 2 - size, top - size * 0.4, size, true, BLUE)
+		PAD.Text(above .. " more", "skategm_ui_sub", x + pw / 2 + 2, top - size * 1.05, BLUE)
+	end
+	if below > 0 then
+		Arrow(x + pw / 2 - size, top + height + size * 0.55, size, false, BLUE)
+		PAD.Text(below .. " more", "skategm_ui_sub", x + pw / 2 + 2, top + height, BLUE)
+	end
+end
+
 function List.Paint(stack, w, h, opts)
 	opts = opts or {}
 	local page = stack[#stack]
@@ -521,11 +606,14 @@ function List.Paint(stack, w, h, opts)
 				local text = (row.change and i == page.sel) and ("< " .. v .. " >") or v
 				PAD.Text(text, "skategm_ui_row", vx, ry, i == page.sel and BLUE or GREY, TEXT_ALIGN_RIGHT)
 			elseif row.sub then
-				PAD.Text(row.sub, "skategm_ui_sub", x + pw, ry + rowH * 0.15, GREY, TEXT_ALIGN_RIGHT)
+				surface.SetFont("skategm_ui_row")
+				local lw = surface.GetTextSize(row.label .. mark) or 0
+				PAD.Text(List.Fit(PAD.T(row.sub), "skategm_ui_sub", pw - lw - 24), "skategm_ui_sub", x + pw, ry + rowH * 0.15, GREY, TEXT_ALIGN_RIGHT)
 			end
 			if i == page.sel and page.inline then page.inline(row, x, ry, pw, rowH) end
 		end
 	end
+	if #rows > visible then List.Scroll(x, y, pw, rowH, h, first, visible, #rows, page.sel) end
 	local sel = rows[page.sel]
 	if page.preview then page.preview(sel, w * 0.5, h * 0.12, w * 0.42, h * 0.68) end
 	local note = opts.note

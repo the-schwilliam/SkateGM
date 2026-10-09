@@ -49,7 +49,7 @@ check("a finish right next to the start is refused", R.phase == "lobby")
 RACE.Command(host, { cmd = "finish", pos = { 3000, 0, 0 } }, t)
 skating[host], skating[bob] = true, true -- joining switched them on; Cat is still loading
 RACE.Command(host, { cmd = "begin" }, t)
-check("start: straight to the countdown, no waiting", R.phase == "countdown" and R.deadline == t + 5)
+check("start: straight to the countdown, no waiting", R.phase == "countdown" and R.deadline == t + 3)
 check("Cat wasn't in Skate 3 mode: she sits this one out, stays for the next", R.entries["3"].racing == nil and #R.players == 3)
 RACE.Think(t + RACE.COUNTDOWN)
 t = t + RACE.COUNTDOWN

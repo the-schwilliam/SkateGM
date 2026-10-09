@@ -293,12 +293,15 @@ for _, f in ipairs(R.FILTERS) do
 	local ok = pcall(R.DrawFilter, f.id, 1.3, 1600, 900, { date = "2026-10-04 12:00" })
 	okAll = okAll and ok
 end
-check("every filter draws (" .. #R.FILTERS .. ": none, b&w, sepia, old film, VHS, contrast, fisheye)", okAll and colourMods == 7 and drawn == 1)
+check("every filter draws (" .. #R.FILTERS .. ": none, b&w, sepia, old film, VHS, contrast, fisheye, camcorder)", okAll and colourMods == 7 and drawn == 2)
 mods = {}
 R.DrawFilter("sepia", 0, 1600, 900, {})
 check("sepia: grey first, then tinted warm (not greyed again: unlike black & white)", #mods == 2 and mods[1]["$pp_colour_colour"] == 0
 	and mods[2]["$pp_colour_colour"] == 1 and mods[2]["$pp_colour_addr"] > mods[2]["$pp_colour_addb"])
-check("fisheye widens the view", R.FilterFov("fisheye", 75) > 75 and R.FilterFov("bw", 75) == 75)
+check("fisheye widens the view", R.FilterFov("fisheye", 75) > 75 and R.FilterFov("camcorder", 75) > R.FilterFov("fisheye", 75) and R.FilterFov("bw", 75) == 75)
+local cu, cv = R.CamcorderUV(0, 0, 1, 16 / 9)
+local eu = R.CamcorderUV(0.5, 0, math.rad(66), 16 / 9)
+check("camcorder fisheye: the middle stays put, the edge is pulled in from the wide view", cu == 0.5 and cv == 0.5 and eu > 0.5 and eu < 0.75)
 check("handheld shake is the same at the same moment (so exports match)", R.Shake(2.5, 1).p == R.Shake(2.5, 1).p and R.Shake(2.5, 1).p ~= R.Shake(2.7, 1).p)
 
 local rclip = {}
@@ -341,3 +344,12 @@ check("two keyframes: the same ease in / out as before", math.abs(R.KeyedCam(two
 local wrap = { free(0, 0, 170), free(1, 100, -170), free(2, 200, -150) }
 local y = R.KeyedCam(wrap, 0.5).ang.y
 check("yaw across 180 takes the short way", math.abs(math.NormalizeAngle(y - 180)) < 15)
+do
+	local small = 0
+	for f = 1, 300 do
+		local du = math.abs(R.Scatter(f * 2 + 1) - R.Scatter(f * 2 - 1))
+		if math.min(du, 1 - du) < 0.02 then small = small + 1 end
+	end
+	print(string.format("%-66s %s", "camcorder grain jumps each frame (doesn't drift: few tiny steps)", small < 15 and "OK" or "<-- WRONG"))
+	print(string.format("%-66s %s", "camcorder grain is soft (alpha 12 or less)", R.CAMCORDER.grain <= 12 and "OK" or "<-- WRONG"))
+end

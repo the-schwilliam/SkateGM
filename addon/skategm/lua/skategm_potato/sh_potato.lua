@@ -15,7 +15,7 @@
 -- close enough.
 POTATO = POTATO or {}
 
-POTATO.mode = SKATEGM_MODES.Register({ id = "potato", title = "Hot Potato", order = 4, color = Color(255, 90, 60), netState = "skategm_potato_state", netCommand = "skategm_potato_cmd" })
+POTATO.mode = SKATEGM_MODES.Register({ music = "arena", id = "potato", category = "Chaos", title = "Hot Potato", order = 4, color = Color(255, 90, 60), netState = "skategm_potato_state", netCommand = "skategm_potato_cmd" })
 POTATO.NET_STATE = POTATO.mode.NET_STATE
 POTATO.NET_CMD = POTATO.mode.NET_CMD
 

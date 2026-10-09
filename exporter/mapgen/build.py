@@ -353,13 +353,14 @@ def build(region, game_root, gmod, out_dir, work_dir, report=print, workers=None
         tools.run(tool, args, check=check)
         split.append(f'{tool} {time.perf_counter() - start:.1f} s')
     report(', '.join(split))
+    vertexlight.clear_prop_padding(base.with_suffix('.bsp'))
     timer.done('compile')
     if region.vertex_lighting:
         vertexlight.mark_baked_props(base.with_suffix('.bsp'))
     lit_files = vertexlight.light_props(base.with_suffix('.bsp'), chunks, game, prefix, build_dir / 'vhv',
                                         lambda bsp, out: pack.extract(tools, bsp, out), report)
     timer.done('lighting')
-    rails = [(frame.point(r.points), r.closed) for r in cropped.rails]
+    rails = [(frame.point(r.points), r.closed, r.native) for r in cropped.rails]
     sk3c = build_dir / 'skate3.sk3c'
     sk3c.write_bytes(skatecol.encode(collision, cropped.collision.surfaces, rails))
     shots = views.plan(collision, s_lo, s_hi, spawn=spawn)

@@ -71,3 +71,23 @@ style = 1
 PAD.Legend(wide, 1600, 900, "bottom")
 local box = boxes[1]
 check("the bar's box reaches past its last words (wide LB buttons counted)", box and lastText and lastText.t == "Delete nearest keyframe" and lastText.x + #lastText.t * 8 <= box.x + box.w)
+local List = SKATEGM_UI.List
+local above, below = List.ScrollInfo(1, 9, 18)
+local a2, b2 = List.ScrollInfo(5, 9, 18)
+local a3, b3 = List.ScrollInfo(10, 9, 18)
+check("long lists say how many more rows are above / below", above == 0 and below == 9 and a2 == 4 and b2 == 5 and a3 == 9 and b3 == 0)
+surface.GetTextSize = function(t) return #t * 8, 14 end
+local fit = List.Fit("a very long description of the minigame", "f", 120)
+check("a description too long for its row is cut short with ...", #fit * 8 <= 120 and fit:sub(-3) == "..." and List.Fit("short", "f", 120) == "short")
+local UI = SKATEGM_UI
+local opened = {}
+UI.Combo(PAD.B.LEFT, { open = function() opened[#opened + 1] = "minigames" end, whileWatching = true })
+UI.Combo(PAD.B.RB, { open = function() opened[#opened + 1] = "replays" end, label = "replay" })
+SKATEGM_MODES = SKATEGM_MODES or {}
+SKATEGM_MODES.spectate = { on = true }
+UI.Press(PAD.B.RB, bit.bor(PAD.B.LB, PAD.B.RB))
+UI.Press(PAD.B.LEFT, bit.bor(PAD.B.LB, PAD.B.LEFT))
+check("watching someone: only the minigame menu opens (no replays)", #opened == 1 and opened[1] == "minigames")
+SKATEGM_MODES.spectate.on = nil
+UI.Press(PAD.B.RB, bit.bor(PAD.B.LB, PAD.B.RB))
+check("... and everything again once not watching", opened[2] == "replays")

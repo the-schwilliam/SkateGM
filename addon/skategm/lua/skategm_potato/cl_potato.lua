@@ -42,12 +42,11 @@ function C.OnState(st, now)
 	st.startV = st.start and Vector(st.start[1], st.start[2], st.start[3]) or nil
 	local me, a = C.Me(st), API()
 	-- knocked out: watching the rest, out of sight and out of the way
-	if a and a.SetHidden then a.SetHidden("potato", (me and me.out and st.phase ~= "idle" and st.phase ~= "results") or false) end
+	local out = (me and me.out and st.phase ~= "idle" and st.phase ~= "results") or false
+	if a and a.SetHidden then a.SetHidden("potato", out) end
+	POTATO.mode:Spectate(out and SKATEGM_MODES.Others(st, function(p) return p.playing and not p.out end) or nil)
 	-- other skaters aren't solid while we play: a bump is just being close
-	-- (spelled out: "x and false or nil" is always nil in Lua)
-	if a and a.SetPlayerCollision then
-		if me and PLAYING[st.phase] then a.SetPlayerCollision(false) else a.SetPlayerCollision(nil) end
-	end
+	POTATO.mode:NoCollide(me and PLAYING[st.phase])
 	-- the bomb changed hands: a fresh hold, as far as passing goes
 	if st.holder ~= prev.holder or st.from ~= prev.from then C.holdingSince = now end
 	-- a blast: everyone sees it; if it was me, I go flying
@@ -149,7 +148,7 @@ function C.DrawWorld()
 	local now = RealTime()
 	render.SetColorMaterial()
 	if st.phase == "playing" and st.holder then
-		local pos = C.SkaterOf(st.holder)
+		local pos = SKATEGM_MODES.DrawnHips(st.holder) or C.SkaterOf(st.holder)
 		if pos then
 			local left = math.Clamp((st.ticking or 1) - (now - (C.stateAt or now)) / (st.fuseLen or 30), 0, 1)
 			local rate = 3 + (1 - left) * 18
@@ -202,15 +201,13 @@ function C.Standings(st)
 end
 
 function C.Paint(w, h, now)
+	if SKATEGM_MODES.HudHidden() then return end
 	local st = C.state
 	if st.phase == "idle" then return end
 	Fonts()
 	local me = C.Me(st)
 	local since = now - (C.stateAt or now)
 	if st.phase == "lobby" then
-		Text("HOT POTATO", "skategm_potato_mid", w / 2, h * 0.04, ORANGE)
-		local line = C.IsHost(st) and "you're the host: LB + D-pad left to start" or (me and "waiting for the host to start" or "LB + D-pad left to join")
-		Text(line, "skategm_potato_small", w / 2, h * 0.04 + h * 0.035, color_white)
 		return
 	end
 	if st.phase == "countdown" then
@@ -229,7 +226,7 @@ function C.Paint(w, h, now)
 		if C.blastAt and now - C.blastAt < 2 then
 			Text("BOOM! " .. string.upper(C.NameOf(st, C.blastEnt)), "skategm_potato_big", w / 2, h * 0.3, RED)
 		end
-		if me and me.out then Text("you're out - watch the rest", "skategm_potato_small", w / 2, h * 0.92, GREY) end
+		if me and me.out then Text("you're out - watch the rest", "skategm_potato_small", w / 2, h * 0.86, GREY) end
 	elseif st.phase == "results" then
 		Text(st.winner and (string.upper(st.winner.name) .. " SURVIVED!") or "NOBODY SURVIVED", "skategm_potato_big", w / 2, h * 0.12, ORANGE)
 	end
@@ -275,13 +272,15 @@ local CHAT = { create = "skategm_potato_create", join = "skategm_potato_join", l
 C.Chat = POTATO.mode:ChatCommands(CHAT, "create, join, leave, startpoint, start, stop, fuse N, lives N")
 
 POTATO.mode:Host({
-	description = "pass the bomb before it blows; starts where you stand",
+	description = "don't be caught with the bomb",
+	about = "One player has a ticking bomb. Skate close to someone to pass it. Nobody knows when it will go off. Whoever has it when it blows loses a life, and the last player with lives left wins.",
 	options = {
 		{ key = "fuse", label = "Fuse", type = "number", min = POTATO.FUSE_MIN, max = POTATO.FUSE_MAX, step = 5, default = POTATO.FUSE_DEFAULT, format = function(v) return "about " .. v .. " s" end },
 		{ key = "lives", label = "Lives", type = "number", min = POTATO.LIVES_MIN, max = POTATO.LIVES_MAX, step = 1, default = POTATO.LIVES_DEFAULT },
+		{ key = "items", label = "Items", type = "bool", default = false },
 	},
 	start = function(v, mode)
-		mode:Send({ cmd = "create", pos = SKATEGM_MODES.PosTable(SKATEGM_MODES.Here()), yaw = LocalPlayer():EyeAngles().y, fuse = v.fuse, lives = v.lives, canSkate = CanSkate() })
+		mode:Send({ cmd = "create", pos = SKATEGM_MODES.PosTable(SKATEGM_MODES.Here()), yaw = LocalPlayer():EyeAngles().y, fuse = v.fuse, lives = v.lives, items = v.items, canSkate = CanSkate() })
 	end,
 })
 -- keep the menu's status up to date

@@ -108,6 +108,7 @@ pub(super) fn advance(
             drives: &mut drives.rows,
         },
     );
+
     if let Err(error) = diagnostics::validate(
         &diagnostics::snapshot(physics, skater),
         "after shared solve",

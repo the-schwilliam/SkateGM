@@ -40,7 +40,10 @@ impl StaticProvider {
         if map.rails.is_empty() {
             return Ok(Self { primitives: vec![], metadata: vec![], rail_guids: vec![], assets: vec![], authored_bounds: vec![], source_for_primitive: vec![], source_rail_indices: vec![] });
         }
-        if map.rails.iter().all(|rail| rail.native.is_none()) { return Self::authored(&map.rails); }
+        // gm_sk8: a BSP's rails carry retail splines without a package's WMET
+        // (gm_skategm's NATIVE_RAILS); build_rails takes those as they are
+        if map.rails.iter().all(|rail| rail.native.is_none())
+            || !map.extensions.iter().any(|e| e.tag == *b"WMET") { return Self::authored(&map.rails); }
         let mut metadata = map.extensions.iter().filter(|e| e.tag == *b"WMET");
         let extension = metadata.next().ok_or("Stock grind provider requires WMET source identity metadata")?;
         if extension.schema != 1 || metadata.next().is_some() { return Err("Expected exactly one WMET schema 1 extension".into()); }

@@ -25,24 +25,30 @@ function C.Head()
 	return p and { p.x, p.y, p.z - 36 } or nil
 end
 
+function C.SpectateUpdate(st)
+	local me, a = C.Me(st), API()
+	local out = (me and st.phase == "playing" and (me.out or C.crashed)) or false
+	if a and a.SetHidden then a.SetHidden("snake", out) end
+	SNAKE.mode:Spectate(out and SKATEGM_MODES.Others(st, function(p) return p.playing and not p.out end) or nil)
+end
+
 function C.OnState(st, now)
 	local prev = C.state or { phase = "idle" }
 	C.state, C.stateAt = st, now
 	local me = C.Me(st)
 	local a = API()
 	-- crashed out: watching the rest, out of sight and out of the way
-	if a and a.SetHidden then a.SetHidden("snake", (me and st.phase == "playing" and (me.out or C.crashed)) or false) end
+	C.SpectateUpdate(st)
 	if me and st.phase ~= "idle" and a and not a.IsSkating() and not a.IsLoading() and CanSkate() and not C.asked then
 		C.asked = true
 		a.StartSkating()
 	end
 	if not me then C.asked = nil end
+	SNAKE.mode:NoCollide(me ~= nil and st.phase ~= "lobby" and st.phase ~= "idle")
 	if st.phase == "countdown" and prev.phase ~= "countdown" then
 		C.trails, C.queue, C.crashed, C.lastSample, C.eaten = {}, {}, nil, nil, {}
-		if a then a.SetPlayerCollision(false) end
 	end
 	if (st.phase == "lobby" or st.phase == "idle") and prev.phase ~= st.phase then
-		if a then a.SetPlayerCollision(nil) end
 		if st.phase == "idle" then C.trails = {} end
 	end
 end
@@ -71,7 +77,7 @@ function C.Crash(by, wall)
 	if C.crashed then return end
 	C.crashed = true
 	local a = API()
-	if a and a.SetHidden then a.SetHidden("snake", true) end
+	C.SpectateUpdate(C.state)
 	Send({ cmd = "crash", by = by, wall = wall })
 	Say(wall and "you hit the wall: you're out" or "you hit a tail: you're out", true)
 	if surface and surface.PlaySound then surface.PlaySound("physics/body/body_medium_impact_hard1.wav") end
@@ -186,13 +192,12 @@ local FONTS = {
 }
 local GREEN, GREY = Color(120, 255, 120), Color(170, 170, 170)
 function C.Paint(w, h, now)
+	if SKATEGM_MODES.HudHidden() then return end
 	local st = C.state
 	if st.phase == "idle" then return end
 	SNAKE.mode:Fonts(FONTS)
 	local left = (st.timeLeft or 0) - (now - (C.stateAt or now))
 	if st.phase == "lobby" then
-		Text("SNAKE", "skategm_snake_mid", w / 2, h * 0.04, GREEN)
-		Text(C.IsHost(st) and "you're the host: LB + D-pad left to start" or (C.Me(st) and "waiting for the host to start" or "LB + D-pad left to join"), "skategm_snake_small", w / 2, h * 0.08, color_white)
 	elseif st.phase == "countdown" then
 		Text(tostring(math.max(1, math.ceil(left))), "skategm_snake_big", w / 2, h * 0.3, GREEN)
 		Text("don't hit any tail, or the wall. Eat the yellow orbs to grow", "skategm_snake_small", w / 2, h * 0.3 + h * 0.09, color_white)
@@ -213,7 +218,8 @@ hook.Add("HUDPaint", "skategm_snake", function() C.Paint(ScrW(), ScrH(), RealTim
 
 SNAKE.mode:ChatCommands({})
 SNAKE.mode:Host({
-	description = "don't hit a tail; eat to grow; last one left wins",
+	description = "don't hit anyone's trail",
+	about = "Everyone leaves a trail behind them. Hit anyone's trail, even your own, and you're out. Eat orbs to make your trail longer. The last skater left wins.",
 	options = {
 		{ key = "area", label = "Arena", type = "region", min = SNAKE.RADIUS_MIN, max = SNAKE.RADIUS_MAX, step = 128, default = SNAKE.RADIUS_DEFAULT, format = function(v) return (v * 2) .. " units across" end },
 		{ key = "time", label = "Time limit", type = "number", min = SNAKE.TIME_MIN, max = SNAKE.TIME_MAX, step = 15, default = SNAKE.TIME_DEFAULT, format = SNAKE.Clock },

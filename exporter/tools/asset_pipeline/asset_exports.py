@@ -35,6 +35,14 @@ def hud(game_root, stage, work, report, log, converted=None):
              '--assets', stage/'assets', '--work', work/'hud'), log, report)
 
 
+def gmod_hud(game_root, stage, work, report, log):
+    from .gmod_hud import lay_out
+    report("Preparing Skate 3's trick display")
+    engine.run(engine.task(engine.TOOLS/'prepare_hud.py', '--game', game_root, '--output', work/'gmod_hud',
+             '--collections', stage/'assets/private/stock/skater-collections.json'), log, report)
+    lay_out(work/'gmod_hud', stage/'assets/private/gmod_hud', report)
+
+
 def character(game_root, stage, work, report, log, converted=None):
     private=stage/"assets/private"
     stock=private/"stock"

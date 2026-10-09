@@ -19,6 +19,8 @@ pub struct Session {
     input: ControllerInput,
     camera: CameraRuntime,
     markers: crate::session_marker::Runtime,
+    forced_wipeout: u32,
+    loose_board_friction: f32,
 }
 pub struct Pose {
     pub root: Mat4,
@@ -28,7 +30,15 @@ pub struct Pose {
     pub velocity: Vec3,
     pub tick: u64,
     pub state: String,
+    /// gm_sk8 addition: POSE_CHRIST_AIR (the animation's ChristAir
+    /// attribute), POSE_BODY_FLIP (KnownAir body flip under way)
+    pub flags: u32,
+    /// gm_sk8: Skate 3 audio surface tags (& 0x7F, 0 = none): the four wheels'
+    /// ground, then the grind's
+    pub audio: [u32; 5],
 }
+pub const POSE_CHRIST_AIR: u32 = 1;
+pub const POSE_BODY_FLIP: u32 = 2;
 impl Session {
     pub fn new(
         root: &Path,
@@ -49,6 +59,10 @@ impl Session {
             "IW4L_SKATE_LOAD physics {}ms",
             started.elapsed().as_millis()
         );
+        let mut physics = physics;
+        // gm_sk8 addition: the stock gesture set (first four in table order),
+        // so the D-pad gestures have selections before the add-on sends its own
+        physics.set_gesture_preferences(Some([0, 1, 2, 3]));
         let skater = SkaterRuntime::load(root, &graphs, &physics, "easy")?;
         eprintln!("IW4L_SKATE_LOAD skater {}ms", started.elapsed().as_millis());
         Ok(Self {
@@ -59,6 +73,8 @@ impl Session {
             input: ControllerInput::default(),
             camera: CameraRuntime::load(root)?,
             markers: crate::session_marker::Runtime::load(root)?,
+            forced_wipeout: 0,
+            loose_board_friction: 0.0,
         })
     }
     /// A builder for collision to swap in later, usable on another thread.
@@ -103,7 +119,54 @@ impl Session {
         m[0] += dv[0];
         m[1] += dv[1];
         m[2] += dv[2];
+        // gm_sk8 addition: KnownAir follows the flight chosen at take-off
+        // and overwrites body velocities, so the push bends that flight too
+        if state.contains("KnownAir") && std::env::var("SK8_AIR_PUSH").as_deref() != Ok("off") {
+            let now = self.skater.known_air.state.trajectory_index_216 as f32 / 60.0;
+            self.skater.trajectory.selector.push_selection([dv[0], dv[1], dv[2], 0.0], now);
+        }
         true
+    }
+
+    /// gm_sk8 addition: knock the skater off (an item hit in a minigame):
+    /// the same wipeout request the ground's hang-up check makes.
+    pub fn force_wipeout(&mut self) {
+        self.forced_wipeout = 1;
+    }
+
+    /// gm_sk8 addition: rolling friction on the board while nobody rides it
+    /// (bails, on foot): `decel` m/s^2 off its speed along the ground, 0 = the
+    /// game's own (a loose board rolls a very long way on smooth floors).
+    pub fn set_loose_board_friction(&mut self, decel: f32) {
+        self.loose_board_friction = if decel.is_finite() { decel.max(0.0) } else { 0.0 };
+    }
+
+    fn roll_loose_board(&mut self) {
+        use skate_core::math::Vector3;
+        let decel = self.loose_board_friction;
+        if decel <= 0.0 {
+            return;
+        }
+        let state = format!("{:?}", self.skater.player_state.current());
+        if !(state.contains("Wipeout") || state.contains("Biped")) {
+            return;
+        }
+        let step = decel * self.period();
+        for body in self.physics.board.bodies_mut() {
+            let v = body.rates.linear_velocity;
+            // (only rolling or sliding: a board flying through the air keeps its speed)
+            if v.y.abs() > 1.5 {
+                continue;
+            }
+            let speed = (v.x * v.x + v.z * v.z).sqrt();
+            if speed <= 1e-4 {
+                continue;
+            }
+            let k = (speed - step).max(0.0) / speed;
+            body.rates.linear_velocity = Vector3::new(v.x * k, v.y, v.z * k);
+            let w = body.rates.angular_velocity;
+            body.rates.angular_velocity = Vector3::new(w.x * k, w.y * k, w.z * k);
+        }
     }
 
     /// Moves the board and skater by `d` (skate space), as standing on
@@ -194,6 +257,55 @@ impl Session {
         for body in self.skater.skeleton.bodies_mut() {
             turn(body);
         }
+    }
+
+    /// The skater's Create-a-Skater settings (gm_sk8 addition): natural stance
+    /// (1 regular, 0 goofy), animation style by name ("" standard, "Loose",
+    /// "Gonzo", "Aggressive", or a pro's own set such as "MikeCarroll"),
+    /// posture profile (0 default, 1 stiff, 2 slouch, 3 buff) and the four
+    /// D-pad gestures (Up, Down, Left, Right; indices into the 37-entry table).
+    pub fn set_style(&mut self, natural: u32, style: &str, posture: u32, gestures: [u32; 4]) {
+        let animation = &mut self.skater.animation;
+        animation.set_customisation(natural, 0);
+        animation.motion.playback_context.pro_skater =
+            skate_core::animation::skeleton_input::name::encode(style.as_bytes());
+        animation.motion.animation.posture.set_profile(posture.min(3));
+        self.physics.set_gesture_preferences(Some(gestures));
+    }
+
+    /// Skate 3's difficulty (gm_sk8 addition): 0 easy, 1 normal, 2 hardcore,
+    /// the game's own physics_mode tables, switched on the next tick.
+    pub fn set_difficulty(&mut self, index: u32) {
+        let d = crate::difficulty::Difficulty::ALL[index.min(2) as usize];
+        self.physics.set_difficulty(d);
+    }
+
+    /// Start Skate 3's shove (the arm swing it uses on pedestrians) straight
+    /// ahead, held for `ticks` (gm_sk8 addition: the RB punch). Only while
+    /// riding on the ground or on foot; returns whether it could start.
+    pub fn shove(&mut self, ticks: u32) -> bool {
+        let state = format!("{:?}", self.skater.player_state.current());
+        if state.contains("Air") || state.contains("Wipeout") || state.starts_with("Grind") {
+            return false;
+        }
+        self.skater.forced_shove = ticks.max(1);
+        true
+    }
+
+    /// Knock the skater off into a bail with this velocity (skate space, m/s),
+    /// where they are now (gm_sk8 addition: hit by another player). Uses the
+    /// engine's vehicle-ejection reset, which enters WipeoutGround seeded
+    /// with momentum.
+    pub fn knock_down(&mut self, velocity: [f32; 3]) -> bool {
+        let state = format!("{:?}", self.skater.player_state.current());
+        if state.contains("Wipeout") || state.contains("Teleport") {
+            return false;
+        }
+        let mut transform = self.skater.animated_skeleton.roots.animation_to_world;
+        transform[3][3] = 0.;
+        let spin = [velocity[2] * 0.3, 0.0, -velocity[0] * 0.3];
+        self.skater.teleport_state.request_vehicle_ejection(transform, velocity, spin);
+        true
     }
 
     /// Back to Skate 3's automatic checkpoint, the last safe spot it recorded,
@@ -299,6 +411,11 @@ impl Session {
             self.physics.animation_profile.physics_mode,
             self.skater.player_input.physical.state.state_16,
         );
+        if self.forced_wipeout > 0 {
+            self.forced_wipeout = 0;
+            super::player_state::force_wipeout(&mut self.physics, &mut self.skater)?;
+        }
+        self.roll_loose_board();
         super::frame::advance(
             &mut self.physics,
             &mut self.skater,
@@ -348,7 +465,23 @@ impl Session {
             velocity: Vec3::new(v.x, v.y, v.z),
             tick: self.physics.ticks,
             state: format!("{:?}", self.skater.player_state.current()),
+            flags: self.pose_flags(),
+            audio: {
+                let w = self.physics.riding.wheel_lines.audio_surfaces;
+                [w[0], w[1], w[2], w[3], self.skater.player_input.physical.grinds.audio_surface_216 & 0x7F]
+            },
         }
+    }
+    fn pose_flags(&self) -> u32 {
+        let mut flags = 0;
+        if self.skater.player_input.processed.flags_2472 & 0x40 != 0 {
+            flags |= POSE_CHRIST_AIR;
+        }
+        let known_air = matches!(self.skater.player_state.current(), skate_core::player::state::PhysicalStateId::KnownAir);
+        if known_air && self.skater.known_air.state.body_flipping_211 {
+            flags |= POSE_BODY_FLIP;
+        }
+        flags
     }
 }
 
@@ -375,6 +508,46 @@ impl CollisionBuilder {
             grind: std::sync::Arc::new(crate::grind_world::StaticProvider::new(Some(&map))?),
         })
     }
+}
+
+/// gm_sk8: the map's retail grind splines (a .skate rail's native bytes, in
+/// skate space) with the first and last point of the polyline each was
+/// sampled into. A rail handed in with those ends grinds on the spline itself,
+/// as it did from a .skate package, instead of on the polyline.
+pub static NATIVE_RAILS: std::sync::Mutex<Vec<([f32; 3], [f32; 3], Vec<u8>)>> = std::sync::Mutex::new(Vec::new());
+
+/// gm_sk8: the map's collision triangles (by their corners' bits) with their
+/// retail surface, native edge codes and sidedness, as a .skate package's
+/// RWCM gave them. Without them every edge was guessed from welded
+/// neighbours, and where two pieces of a curved rail's tube meet that came
+/// out sharp: the board caught on it.
+type NativeTriangle = (u32, Option<[u8; 3]>, bool);
+static NATIVE_TRIANGLES: std::sync::Mutex<Option<std::collections::HashMap<[u32; 9], NativeTriangle>>> =
+    std::sync::Mutex::new(None);
+
+pub fn set_native_triangles(tris: Vec<([[f32; 3]; 3], u32, Option<[u8; 3]>, bool)>) {
+    let map = (!tris.is_empty()).then(|| {
+        tris.into_iter().map(|(p, surface, edges, one_sided)| (key(&p), (surface, edges, one_sided))).collect()
+    });
+    *NATIVE_TRIANGLES.lock().unwrap_or_else(|e| e.into_inner()) = map;
+}
+
+fn key(p: &[[f32; 3]; 3]) -> [u32; 9] {
+    std::array::from_fn(|i| p[i / 3][i % 3].to_bits())
+}
+
+/// Bit 31 of a collision triangle's surface: its mesh is one-sided (only from
+/// NATIVE_TRIANGLES; skate_world takes it off again).
+pub(crate) const SURFACE_ONE_SIDED: u32 = 1 << 31;
+/// Bit 30: the triangle came from NATIVE_TRIANGLES (its surface and
+/// sidedness are the game's own).
+pub(crate) const SURFACE_RETAIL: u32 = 1 << 30;
+
+fn native_for(points: &[[f32; 3]]) -> Option<Vec<u8>> {
+    let (first, last) = (points.first()?, points.last()?);
+    let near = |a: &[f32; 3], b: &[f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() <= 0.01);
+    let natives = NATIVE_RAILS.lock().unwrap_or_else(|e| e.into_inner());
+    natives.iter().find(|(f, l, _)| near(f, first) && near(l, last)).map(|n| n.2.clone())
 }
 
 /// IW4L's collision as a Skate map: one material, the triangles and rails.
@@ -412,15 +585,21 @@ fn collision_map(
             geometry: Geometry {
                 vertices: vec![],
                 indices: vec![],
-                collision: triangles
-                    .into_iter()
-                    .map(|points| Collision {
-                        points,
-                        surface: 0,
-                        material: 1,
-                        native_edges: None,
-                    })
-                    .collect(),
+                collision: {
+                    let natives = NATIVE_TRIANGLES.lock().unwrap_or_else(|e| e.into_inner());
+                    triangles
+                        .into_iter()
+                        .map(|points| {
+                            let native = natives.as_ref().and_then(|m| m.get(&key(&points)));
+                            Collision {
+                                points,
+                                surface: native.map_or(0, |n| (n.0 & 0xFFFF) | SURFACE_RETAIL | if n.2 { SURFACE_ONE_SIDED } else { 0 }),
+                                material: 1,
+                                native_edges: native.and_then(|n| n.1),
+                            }
+                        })
+                        .collect()
+                },
             },
             rails: rails
                 .into_iter()
@@ -428,8 +607,8 @@ fn collision_map(
                 .map(|(i, p)| Rail {
                     name: format!("iw4_edge_{i}"),
                     closed: false,
+                    native: native_for(&p),
                     points: p,
-                    native: None,
                 })
                 .collect(),
             doors: vec![],

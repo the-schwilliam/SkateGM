@@ -28,6 +28,7 @@ vbsp = "0.9.1"
 lzma-rs = "0.3.0"
 serde_json = "1.0.151" # reading Skate 3's English language table, if present   # same version vbsp uses; for reading raw (compressed) lumps
 glam = "0.32.1"
+serde = { version = "1", features = ["derive"] } # gm_sk8: Skate 3's trick display (hud/)
 
 [profile.release]
 opt-level = 3

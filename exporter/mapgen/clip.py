@@ -126,7 +126,8 @@ def clip_triangles(triangles, surfaces, area):
     for k in straddle:
         for piece in _pieces([(p,) for p in tris[k]], area, True):
             extra.append(np.stack([v[0] for v in piece]))
-            extra_s.append(surfaces[k])
+            # (a piece of a cut triangle keeps its surface, not its edges)
+            extra_s.append(int(surfaces[k]) & 0xFFFFFFFF)
     if extra:
         keep.append(np.asarray(extra))
         keep_s.append(np.asarray(extra_s, surfaces.dtype))
@@ -146,7 +147,9 @@ def _rails(rails, area):
                     out.append(Rail(np.asarray(run, np.float32), False))
                 run = []
         if len(run) >= 2:
-            out.append(Rail(np.asarray(run, np.float32), rail.closed and inside.all()))
+            # (a rail kept whole keeps its retail spline; a cut one is a polyline)
+            whole = bool(inside.all())
+            out.append(Rail(np.asarray(run, np.float32), rail.closed and whole, rail.native if whole else None))
     return out
 
 

@@ -67,7 +67,7 @@ function LocalPlayer() return ME end
 local api = { state = "PhysicsGround", info = { line = 0, multiplier = 1 }, speed = 0 }
 SkateGM = { API = {
 	IsSkating = function() return true end, IsLoading = function() return false end, CanSkate = function() return true end,
-	State = function() return api.state end, ScoreInfo = function() return api.info end, Speed = function() return api.speed end, Say = function() end,
+	State = function() return api.state end, ScoreInfo = function() return api.info end, Speed = function() return api.speed end, Say = function() end, OnBoard = function() return api.onBoard ~= false end,
 } }
 SKATEGM_MODES = nil
 dofile("../../addon/skategm/lua/skategm_modes/sh_modes.lua")
@@ -114,3 +114,20 @@ local n = 0
 for _, m in ipairs(sent) do if m.cmd == "done" and m.cell == 1 then n = n + 1 end end
 check("each square is sent once", n == 1)
 check("Trick Bingo is hostable from the controller menu", BINGO.mode.hostDef ~= nil)
+sent = {}
+api.info = { line = 0, multiplier = 1, clean = true }
+api.speed, api.state = 0, "PhysicsGround"
+C.OnState(stateWith("countdown"), 20)
+C.OnState(stateWith("playing"), 23)
+frame(23.1)
+frame(23.2)
+check("a new game right after a clean landing: Clean landing doesn't tick by itself", not done(9))
+frame(24, nil, { clean = false })
+frame(25, nil, { clean = true })
+check("... a clean landing in this game does", done(9))
+api.onBoard = false
+frame(26, "WipeoutGround", nil, 14)
+check("the board rolling off at 14 m/s without me on it: no speed square", not done(7))
+api.onBoard = true
+frame(27, "PhysicsGround", nil, 14)
+check("... riding it at 14 m/s: ticks", done(7))

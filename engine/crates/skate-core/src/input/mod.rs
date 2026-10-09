@@ -23,3 +23,5 @@ pub mod body_flip_signal;
 
 pub mod wipeout_intentions;
 pub mod offboard_intentions;
+// gm_sk8 addition: D-pad gestures, ported from SK8-ENGINE/skate-3-rust-engine
+pub mod gameplay_gestures;

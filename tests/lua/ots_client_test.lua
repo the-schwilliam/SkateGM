@@ -22,6 +22,7 @@ SkateGM = { API = {
 	StartSkating = function() api.starts = api.starts + 1 end, StopSkating = function() api.stops = api.stops + 1 api.skating = false end,
 	TeleportTo = function(p, y) api.teleports[#api.teleports + 1] = { p, y } return true end,
 	Score = function() return api.score end,
+	ScoreInfo = function() return { total = api.banked or 0 } end,
 	PoseOf = function(ply) if ply == ANN then return { HIPS = Vector(500, 0, 40) } end end,
 	Say = function() end,
 } }
@@ -41,13 +42,15 @@ local now = 10
 -- Ann's turn: I'm taking part but not active, and I was skating -> stop, and watch
 api.skating = true
 C.OnState(st("prep", 1), now)
-check("someone else's turn: I stop skating to watch", api.stops == 1)
+check("someone else's turn: I watch them (spectating, not stopped)", api.stops == 0 and OTS.mode.spectating ~= nil)
 C.OnState(st("turn", 1), now)
-local v1 = C.View(now) now = now + 0.1
-local v = C.View(now)
-check("chase camera follows the active skater", v and v.origin and (v.origin - Vector(500, 0, 50)):Length() < 250)
+local watched = false
+for _, e in ipairs(OTS.mode.spectating or {}) do if e == 1 then watched = true end end
+check("the active skater is the one I can watch", watched)
 -- my turn
+api.skating = false
 C.OnState(st("prep", 2), now)
+check("my turn: no more watching", OTS.mode.spectating == nil)
 check("my turn: Skate 3 mode switches on", api.starts == 1)
 C.Think(now)
 check("not teleported until skating", #api.teleports == 0)
@@ -61,7 +64,7 @@ check("then ready", lastCmd().cmd == "ready")
 check("no camera override on my own turn", C.View(now) == nil)
 api.score = 5000
 C.OnState(st("turn", 2), now + 4)
-check("GO: fresh start at the spot, score counted from here", #api.teleports == 2 and C.baseline == 5000)
+check("GO: fresh start at the spot, score counted from here", #api.teleports >= 2 and api.teleports[#api.teleports][1].x == 100 and C.baseline == 5000)
 api.score = 7400
 C.Think(now + 5)
 check("live score is only what I earned this turn", lastCmd().cmd == "live" and lastCmd().score == 2400)
@@ -87,3 +90,45 @@ for _, ph in ipairs({ "lobby", "prep", "countdown", "turn", "between", "final" }
 	if not ok then okAll = false print("  " .. ph .. ": " .. tostring(err)) end
 end
 check("display draws in every phase", okAll)
+
+-- held still at the spot through the countdown; a bail has to be real
+local frozen = {}
+SkateGM.API.Freeze = function(on, why) frozen[why or "mode"] = on or nil end
+SkateGM.API.State = function() return api.state end
+api.skating, api.state = true, "PhysicsGround"
+C.OnState(st("prep", 2), 50)
+C.Think(50) C.Think(50.7)
+C.OnState(st("countdown", 2), 51)
+C.Think(51.1)
+check("countdown: held still at the spot", frozen.ots_hold == true)
+C.OnState(st("turn", 2, { bailEnds = true }), 54)
+C.Think(54.05)
+check("GO: let go", frozen.ots_hold == nil)
+sentCmds = {}
+api.state = "WipeoutGround"
+C.Think(54.2) C.Think(54.6)
+local bailed = false
+for _, m in ipairs(sentCmds) do if m.cmd == "bailed" then bailed = true end end
+check("a wipeout in the turn's first second: not a bail", not bailed)
+api.state = "PhysicsGround"
+C.Think(56)
+api.state = "WipeoutGround"
+C.Think(56.1)
+for _, m in ipairs(sentCmds) do if m.cmd == "bailed" then bailed = true end end
+check("a one-frame wipeout later on: not a bail either", not bailed)
+api.score, api.banked = 1500, 1000
+C.Think(56.4)
+local bailScore
+for _, m in ipairs(sentCmds) do if m.cmd == "bailed" then bailed = true bailScore = m.score end end
+check("a real one (a quarter second in it): the turn's bail", bailed)
+check("... and the line it bailed out of doesn't count: only the banked points", bailScore == 1000)
+api.score, api.banked = 0, 0
+local hidden = {}
+SkateGM.API.SetHidden = function(why, on) hidden[why] = on or nil end
+C.OnState(st("turn", 2), 60)
+C.OnState(st("between", 0, { last = { name = "Me", ent = 2, score = 0, reason = "bailed" } }), 61)
+check("my turn just ended (a bail): I stay in sight, free to goof off", not hidden.ots and OTS.mode.spectating == nil and not frozen.ots_wait)
+C.OnState(st("prep", 1), 64)
+check("the next turn starts: out of the way and watching", hidden.ots and OTS.mode.spectating ~= nil)
+C.OnState(st("between", 0, { last = { name = "Ann", ent = 1, score = 10 } }), 70)
+check("someone else's turn ended: I keep waiting", hidden.ots)

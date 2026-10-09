@@ -1,7 +1,7 @@
 local SPARKS = BOARD.RegisterEffect({
 	id = "sparks", title = "Grind sparks", order = 3,
 	fields = {
-		{ key = "on", kind = "bool", convar = "skategm_sparks", default = true, label = "Grind sparks" },
+		{ key = "on", kind = "bool", convar = "skategm_sparks", default = false, label = "Grind sparks" },
 		{ key = "mode", kind = "choice", convar = "skategm_sparks_mode", choices = { "Hot metal", "My player colour", "Rainbow", "Custom colour" }, default = 1, label = "Spark colour" },
 		{ key = "color", kind = "color", convar = "skategm_sparks_color", default = "120 200 255", label = "Sparks: custom colour", showWhen = { "mode", 4 } },
 		{ key = "amount", kind = "number", convar = "skategm_sparks_amount", min = 1, max = 10, default = 5, decimals = 0, label = "Spark amount" },

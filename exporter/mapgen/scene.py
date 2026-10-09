@@ -50,6 +50,26 @@ class Mesh:
     scenery: bool = False
 
 
+# A collision triangle's "surface" (uint64): the retail surface ID in the low
+# 32 bits; bits 32-55 its three native edge codes, bit 56 set when it has
+# them, bit 57 when its mesh is one-sided (gm_sk8: carried into SK3C 3 so
+# SkateGM's engine gets the edges a .skate package's RWCM gave it)
+EDGES_SHIFT = 32
+HAS_EDGES = 1 << 56
+ONE_SIDED = 1 << 57
+SURFACE_MASK = 0xFFFFFFFF
+
+
+def pack_surface(surface, edge_codes, one_sided):
+    v = int(surface) & SURFACE_MASK
+    if edge_codes is not None:
+        e = [int(c) & 0xFF for c in edge_codes]
+        v |= (e[0] | e[1] << 8 | e[2] << 16) << EDGES_SHIFT | HAS_EDGES
+    if one_sided:
+        v |= ONE_SIDED
+    return v
+
+
 @dataclass
 class Collision:
     triangles: np.ndarray
@@ -57,13 +77,17 @@ class Collision:
 
     @staticmethod
     def empty():
-        return Collision(np.zeros((0, 3, 3), np.float32), np.zeros(0, np.uint32))
+        return Collision(np.zeros((0, 3, 3), np.float32), np.zeros(0, np.uint64))
 
 
 @dataclass
 class Rail:
     points: np.ndarray
     closed: bool = False
+    # the retail spline as a .skate package stores it (map_writer.py): spline
+    # id, type signature, flags, trailing word, segment count, then each
+    # segment's 30 words, little endian, in Skate 3's own coordinates
+    native: bytes | None = None
 
 
 @dataclass
@@ -177,7 +201,7 @@ def _collision_module():
     return rcm
 
 
-COLLISION_CACHE = 'mapgen_collision_v1.npz'
+COLLISION_CACHE = 'mapgen_collision_v2.npz'
 
 
 def _collision(root, manifest):
@@ -202,12 +226,13 @@ def _decode_collision(root, manifest):
         if not path.is_file():
             continue
         for mesh in rcm.decode_rx2_clustered_meshes(path.read_bytes()):
+            one_sided = bool(mesh.mesh_flags & 0x10)
             for t in mesh.triangles:
                 tris.append((t.a, t.b, t.c))
-                surfaces.append(t.surface)
+                surfaces.append(pack_surface(t.surface, t.edge_codes, one_sided))
     if not tris:
         return Collision.empty()
-    return Collision(np.asarray(tris, np.float32), np.asarray(surfaces, np.uint32))
+    return Collision(np.asarray(tris, np.float32), np.asarray(surfaces, np.uint64))
 
 
 def _segment_points(payload, steps):
@@ -221,8 +246,16 @@ def _rails(manifest):
     rails = []
     for rail in manifest.get('grind_splines', []):
         pieces = []
-        for hexdata in rail.get('native_segment_payloads', []):
-            payload = bytes.fromhex(hexdata)
+        payloads = [bytes.fromhex(h) for h in rail.get('native_segment_payloads', [])]
+        native = None
+        if payloads and all(len(p) == 120 for p in payloads):
+            try:
+                native = struct.pack('<QQIII', int(rail['spline_id'], 0), int(rail['type_signature'], 0),
+                                     int(rail['flags']), int(rail['trailing_word']), len(payloads))
+                native += b''.join(np.frombuffer(p, '>u4').astype('<u4').tobytes() for p in payloads)
+            except (KeyError, ValueError, TypeError):
+                native = None
+        for payload in payloads:
             if len(payload) < 120:
                 continue
             coarse = _segment_points(payload, 1)
@@ -233,7 +266,7 @@ def _rails(manifest):
         if pieces:
             points = np.concatenate(pieces).astype(np.float32)
             if np.all(np.isfinite(points)) and len(points) >= 2:
-                rails.append(Rail(points, bool(rail.get('closed'))))
+                rails.append(Rail(points, bool(rail.get('closed')), native))
     return rails
 
 

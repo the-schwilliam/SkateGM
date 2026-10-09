@@ -84,6 +84,7 @@ While this works best with a controller, keyboard is supported:
 | R | Respawn |
 | L | Exit free camera mode |
 | Ctrl | Rocket board |
+| Alt | Use your item (in minigames with items) |
 | W / A / S / D (in the map, park editor, replays) | Move |
 | Backspace (in menus) | Back |
 
@@ -101,6 +102,31 @@ Host one with LB + D-pad left; others join from the same menu.
 | Trick Bingo | A shared 3x3 card of tricks and tasks. Land the lines that tick them off; three in a row wins. |
 | Run Royale | Everyone skates a short run at once, then the runs are replayed and everyone votes out the worst. Last one left wins. |
 | Hall of Meat | Take turns bailing as hard as you can. Every impact injures a body part; damage, injuries and air time add up to your score. |
+| Impostor | Everyone but one is told a score to hit in one line. Take turns, then vote out who was faking it. |
+| S.K.A.T.E. | Set a trick; everyone else has to land it. Miss and you get a letter; spell it and you're out. |
+| Rocket Royale | Every rocket board fires flat out, the whole time. Last one riding wins. |
+| Bullseye | Jump from the start and land in the target's rings (gold 6, purple 3, blue 2, green 1); steer with the rocket board in the air. |
+| Steezus Stint | Own the Spot, but you score for time held in the Christ Air (grab + B), double while back or front flipping. |
+| Ghost Writer | Everyone skates a run unseen; the replays show everyone looking the same. Guess whose run is whose. |
+| Skull Runners | Grab the most floating skulls before time runs out; a bail drops some of yours. |
+| Ball Battle | Hits and bails pop your bouncy balls; lose them all and you're out. Last one with balls wins. |
+| Body Bingo | A 3x3 card of injuries (Left Ankle: Bruised, Skull: Fractured...). Bail to get hurt in just the right places; three in a row wins. |
+| Copycat | Everyone sets a line once while the rest watch live; then the others copy it at the same time, unseen. The replays show each copy beside the setter (with a name tag over them), scored on how close it was. |
+| Freeze Frame | Everyone skates at once. Left stick in freezes you mid-trick and opens a photo camera (move it, zoom, pick a filter, A takes it, B unfreezes to try again; no photo by the end and the chase camera's view is your photo). Everyone sees every photo, then votes out the worst; last one standing wins. |
+| Hold the Line | Co-op: one line passed from skater to skater. When your time's up the next player takes over exactly where you are, same direction and speed. One bail, or the line slowing to a stop, ends it for everyone. |
+| Basketboard | Take turns: one dismount or bail to get your board, or yourself, down through a ghost hoop. The host places the hoop wherever they like, and picks its size, height and which way it faces. |
+| Board Golf | The host is the tee and places the cup. Ride a few seconds (rocket on); when the clock runs out your board rolls on by itself, and wherever it stops is your next shot. Fewest strokes to rest it in the cup wins. |
+
+**Items:** in Skull Runners, Ball Battle, and in Hot Potato and Melon King if
+the host turns them on, floating crates hold items: Rocket, Grenade, Traffic
+Cone, Crowbar and Physics Gun. Skate through a crate to take one, then press
+the **left stick in** (keyboard: **Alt**) to use it. Add-ons can add their
+own items: see [docs/ITEMS.md](docs/ITEMS.md).
+
+Hosts can invite players from the game's menu; an invite is joined with
+LB + RT. When you're out or it's someone else's turn you watch the others:
+the right stick turns the camera, the D-pad switches player, Y gives a free
+camera.
 
 Server owners can turn each one off in Settings > Advanced, or with
 `skategm_<mode>_allowed 0`.
@@ -195,8 +221,9 @@ as well release it.
 SkateGM builds on others' open work:
 
 - **[SK8-ENGINE/skate-3-rust-engine](https://github.com/SK8-ENGINE/skate-3-rust-engine)**:
-  the Skate 3 engine reimplementation SkateGM runs, and the data exporter in
-  `exporter/tools/` (commit `cb79689`).
+  the Skate 3 engine reimplementation SkateGM runs, the data exporter in
+  `exporter/tools/` (commit `cb79689`), and the APT player behind Skate 3's own
+  trick display (`gm_skategm/src/hud/`).
 - **[2010 Rust Rewrite Mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)**
   by chasmlol (Apache-2.0; a fork of [IW4L](https://github.com/vladtrc/iw4L)
   by vladtrc). The engine in `engine/` is its `skate/` folder with our changes
@@ -211,9 +238,16 @@ SkateGM builds on others' open work:
 Thanks also to **[renchdedsex](https://github.com/renchdedsex)** for the
 **Rench Fix**, merged with their permission: better posture on playermodels,
 the skater, board and camera at 60 FPS, the Flick-It HUD, and keyboard and
-mouse support.
+mouse support, and for Skate 3's own trick display, trick naming and
+scoring, darkslide flip-outs, D-pad gestures, skating styles and difficulty,
+punches, replay ghosts, resized props and the skater's shadow.
 
-Each part's licence is listed in
+## Licence
+
+SkateGM is free software under the GNU General Public License, version 3
+([`LICENSE`](LICENSE)): you can share and change it, as long as what you pass
+on stays under the same licence with its source. The parts it builds on keep
+their own licences (Apache-2.0, MIT, zlib, GPL-3.0), listed in
 [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md).
 
 SkateGM is a fan project, not affiliated with or endorsed by Electronic

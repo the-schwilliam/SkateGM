@@ -15,6 +15,7 @@ function M.Get(id) return M.modes[id] end
 
 local Mode = {}
 Mode.__index = Mode
+M.Mode = Mode
 
 function Mode:Allowed() return self.cvAllowed == nil or self.cvAllowed:GetBool() end
 
@@ -38,7 +39,69 @@ end
 -- phases where a game isn't being played (setting up, showing who won):
 -- respawning and teleporting to players are fine then, not in between
 M.FREE_PHASES = { idle = true, lobby = true, results = true, final = true }
+
+-- the board rules: off (nobody has it) or on (everyone in the game has it,
+-- whatever their own setting); a mode can force the rocket to fire ("force").
+-- The rocket on can be metered: fuel = seconds of thrust, refilling when not
+-- in use (nil = infinite)
+M.ROCKET_FUELS = { 1, 3, 5 }
+M.ROCKET_CHOICES = { { 0, "off" }, { 1, "metered (1s)" }, { 3, "metered (3s)" }, { 5, "metered (5s)" }, { -1, "infinite" } }
+function M.CleanFuel(v)
+	v = tonumber(v)
+	for _, f in ipairs(M.ROCKET_FUELS) do if f == v then return f end end
+	return nil
+end
+M.BOARD_OPTIONS = {
+	{ key = "_rocket", label = "Rocket board", type = "choice", choices = M.ROCKET_CHOICES, default = 0, help = "every player has the rocket board (right stick in to fire); metered: seconds of fuel, refilling when not in use" },
+	{ key = "_hover", label = "Hoverboard", type = "bool", default = false, help = "on: every player rides the hoverboard" },
+}
+function M.CleanRules(r)
+	if type(r) ~= "table" then return nil end
+	local rocket = r.rocket == "force" and "force" or ((r.rocket == "on" or r.rocket == true) and "on" or false)
+	return { rocket = rocket, fuel = rocket == "on" and M.CleanFuel(r.fuel) or nil, hover = (r.hover == "on" or r.hover == true) and "on" or false }
+end
+-- where a game starts: the host's spot and facing ("Here"), or wherever
+-- they put it with the object placer (an arrow shows the way to go). Every
+-- mode gets it unless its Host def says useStart = false. Arrives on the
+-- server as create's _start = { pos = { x, y, z }, yaw }: M.HostStart.
+M.START_OPTION = { key = "_start", label = "Start", type = "object", here = true, required = false,
+	help = "here: where you stand, facing where you look. A: put it somewhere else (D-pad turns the arrow)" }
+function M.CleanStart(t)
+	if type(t) ~= "table" then return nil end
+	local p = M.Vec(t.pos)
+	local yaw = tonumber(t.yaw)
+	if not p or not yaw or yaw ~= yaw or math.abs(p[1]) > 1e6 or math.abs(p[2]) > 1e6 or math.abs(p[3]) > 1e6 then return nil end
+	return { pos = p, yaw = yaw % 360 }
+end
+
 function M.InPlay(st) return st ~= nil and st.phase ~= nil and not M.FREE_PHASES[st.phase] end
+
+-- a no-zone (Bullseye's ring, Basketboard's circle): a flat band around
+-- centre {x, y, z} from inner to outer, height units up and down. Touching
+-- it ends the go
+-- (z within low below to high above the zone's surface: touching it, not
+-- riding a platform over it or a floor under it)
+M.NO_ZONE_LOW, M.NO_ZONE_HIGH = 8, 16
+function M.InNoZone(centre, inner, outer, x, y, z, low, high)
+	if not (centre and outer and outer > inner) then return false end
+	local d = math.sqrt((x - centre[1]) ^ 2 + (y - centre[2]) ^ 2)
+	local dz = z - centre[3]
+	return d > inner and d <= outer and dz >= -(low or M.NO_ZONE_LOW) and dz <= (high or M.NO_ZONE_HIGH)
+end
+
+-- a skater touching it: the board, the feet, or (lying, after a bail) the
+-- body, each at the height it has when it's down on that surface
+M.NO_ZONE_BONES = { SKATEBOARD_ROOT = 16, RIGHTFOOT = 14, LEFTFOOT = 14 }
+M.NO_ZONE_LYING = 16
+function M.TouchingNoZone(P, centre, inner, outer, lying)
+	if not P then return false end
+	if lying and P.HIPS and M.InNoZone(centre, inner, outer, P.HIPS.x, P.HIPS.y, P.HIPS.z, M.NO_ZONE_LOW, M.NO_ZONE_LYING) then return true end
+	for bone, high in pairs(M.NO_ZONE_BONES) do
+		local p = P[bone]
+		if p and M.InNoZone(centre, inner, outer, p.x, p.y, p.z, M.NO_ZONE_LOW, high) then return true end
+	end
+	return false
+end
 
 ---------------------------------------------------------------------------
 -- small helpers every mode uses
@@ -90,19 +153,72 @@ M.GROUND_SPAN, M.GROUND_STEPS = 1536, 16
 function M.Ground(x, y, ref)
 	if not (util and util.TraceLine) then return ref end
 	local best, bestGap
-	local z, bottom = ref + M.GROUND_SPAN, ref - M.GROUND_SPAN
-	for _ = 1, M.GROUND_STEPS do
-		if z <= bottom then break end
-		local tr = util.TraceLine({ start = Vector(x, y, z), endpos = Vector(x, y, bottom), mask = MASK_PLAYERSOLID })
-		if not tr.Hit or tr.HitSky then break end
-		local hz = tr.HitPos.z
-		if not tr.StartSolid and tr.HitNormal and tr.HitNormal.z > 0.5 then
-			local gap = math.abs(hz - ref)
-			if not bestGap or gap < bestGap then best, bestGap = hz, gap end
+	local function down(from, bottom)
+		local z = from
+		for _ = 1, M.GROUND_STEPS do
+			if z <= bottom then return end
+			local tr = util.TraceLine({ start = Vector(x, y, z), endpos = Vector(x, y, bottom), mask = MASK_PLAYERSOLID })
+			if not tr.Hit or tr.HitSky then return end
+			if tr.StartSolid then
+				-- inside a brush (a roof, a wall top): carry on from where the trace left it
+				local left = tr.FractionLeftSolid or 0
+				if left <= 0 or left >= 1 then return end
+				z = z - (z - bottom) * left - 1
+			else
+				local hz = tr.HitPos.z
+				if tr.HitNormal and tr.HitNormal.z > 0.5 then
+					local gap = math.abs(hz - ref)
+					if not bestGap or gap < bestGap then best, bestGap = hz, gap end
+				end
+				z = hz - 8
+			end
 		end
-		z = math.min(z, hz) - 8
 	end
+	-- just over the height asked about first (the usual case: the floor is
+	-- right under it), then from high up for hills and floors above
+	down(ref + 72, ref - M.GROUND_SPAN)
+	if not bestGap or bestGap > 72 then down(ref + M.GROUND_SPAN, ref - M.GROUND_SPAN) end
 	return best or ref
+end
+
+local function SegDist(p, a, b)
+	local abx, aby, abz = b[1] - a[1], b[2] - a[2], b[3] - a[3]
+	local apx, apy, apz = p[1] - a[1], p[2] - a[2], p[3] - a[3]
+	local len = abx * abx + aby * aby + abz * abz
+	local t = len > 0 and math.max(0, math.min(1, (apx * abx + apy * aby + apz * abz) / len)) or 0
+	local dx, dy, dz = apx - abx * t, apy - aby * t, apz - abz * t
+	return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+local function Nearest(p, to)
+	if #to == 1 then return SegDist(p, to[1], to[1]) end
+	local best = math.huge
+	for i = 1, #to - 1 do
+		local d = SegDist(p, to[i], to[i + 1])
+		if d < best then best = d end
+	end
+	return best
+end
+
+-- the average, over the points of one path, of how close each is to the
+-- line of the other (close(d): 1 near, falling to 0 far)
+function M.Closeness(from, to, close)
+	if #from == 0 or #to == 0 then return 0 end
+	local sum = 0
+	for _, p in ipairs(from) do sum = sum + close(Nearest(p, to)) end
+	return sum / #from
+end
+
+-- 0-100 (Copycat, Telephone): how near the copy stays to the setter's line (half at scale / 2
+-- off it), times how much of the setter's line it covers (in full within
+-- scale / 2). Point by point, so a stray sample or a slower copy costs a
+-- little, not everything
+function M.PathMatch(lead, copy, scale)
+	if not (lead and copy) or #lead < 2 or #copy < 2 then return 0 end
+	local half = (scale or 192) / 2
+	local near = M.Closeness(copy, lead, function(d) return 1 / (1 + (d / half) ^ 2) end)
+	local covered = M.Closeness(lead, copy, function(d) return d <= half and 1 or 1 / (1 + ((d - half) / (half / 2)) ^ 2) end)
+	return math.floor(100 * near * covered + 0.5)
 end
 
 if SERVER then
@@ -113,8 +229,29 @@ if SERVER then
 		return M.InPlay(st)
 	end
 
+	-- where the host's game starts: the Start they set, or where they stand
+	function M.HostStart(ply, m)
+		local s = M.CleanStart(type(m) == "table" and m._start or nil)
+		if s then return Vector(s.pos[1], s.pos[2], s.pos[3]), s.yaw end
+		return ply:GetPos(), ply:EyeAngles().y
+	end
+
+	-- LB + X during a game: where the game says (mode:RespawnAt), or not at all
+	function Mode:RespawnAt(fn) self.respawnFn = fn end
+	function M.RespawnPointFor(ply)
+		local mode, key = M.SessionOf(ply)
+		if not (mode and mode.respawnFn) then return nil end
+		if mode.live and key ~= true then mode:Enter(key) end
+		local ok, pos, yaw = pcall(mode.respawnFn, ply)
+		if mode.live and key ~= true then mode:Settle() end
+		if ok and pos then return pos, yaw end
+	end
+
 	hook.Add("SkateGMCanRespawn", "skategm_modes", function(ply)
-		if M.PlayerInPlay(ply) then return false end
+		if M.PlayerInPlay(ply) and not M.RespawnPointFor(ply) then return false end
+	end)
+	hook.Add("SkateGMRespawnPoint", "skategm_modes", function(ply)
+		if M.PlayerInPlay(ply) then return M.RespawnPointFor(ply) end
 	end)
 
 	function Mode:UseSessions(live)
@@ -172,6 +309,25 @@ if SERVER then
 	end
 
 	-- ...in any mode
+	M.NET_INVITE = "skategm_modes_invite"
+	util.AddNetworkString(M.NET_INVITE)
+	function Mode:Invite(ply, m)
+		local live = self.live
+		if not live or live.phase ~= "lobby" then return self:Tell(ply, "invites are for the lobby, before the game starts") end
+		local member = live.host == ply
+		for _, p in ipairs(live.players or {}) do if p == ply then member = true end end
+		if not member then return end
+		local target = Entity(tonumber(m.target) or 0)
+		if not (IsValid(target) and target:IsPlayer()) or target == ply then return end
+		if M.SessionOf(target) ~= nil then return self:Tell(ply, target:Nick() .. " is already in a minigame") end
+		net.Start(M.NET_INVITE)
+		net.WriteString(self.id)
+		net.WriteString(tostring(self.current or ""))
+		net.WriteString(ply:Nick())
+		net.Send(target)
+		self:Tell(ply, "invited " .. target:Nick())
+	end
+
 	function M.SessionOf(ply)
 		for _, mode in pairs(M.modes) do
 			if mode.live then
@@ -203,12 +359,30 @@ if SERVER then
 	-- Join menu forgets one it hasn't heard of for a while, and a quiet lobby
 	-- (nothing changing) went unheard - other players couldn't see it
 	M.RESEND = 1
+	-- (a resent state's clocks count on from when it was made: resending the
+	-- old timeLeft put every countdown back to where it started each second)
+	M.CLOCK_KEYS = { "timeLeft" }
+	function M.Aged(state, seconds)
+		if seconds <= 0 then return state end
+		local copy
+		for _, k in ipairs(M.CLOCK_KEYS) do
+			if type(state[k]) == "number" then
+				if not copy then
+					copy = {}
+					for key, v in pairs(state) do copy[key] = v end
+				end
+				copy[k] = math.max(0, state[k] - seconds)
+			end
+		end
+		return copy or state
+	end
+
 	function Mode:Resend(now)
 		for key, entry in pairs(self.lastStates or {}) do
 			if now - entry.at >= M.RESEND then
 				entry.at = now
 				net.Start(self.NET_STATE)
-				net.WriteString(Encode(entry.state))
+				net.WriteString(Encode(M.Aged(entry.state, now - (entry.made or now))))
 				net.Broadcast()
 			end
 		end
@@ -216,10 +390,12 @@ if SERVER then
 
 	function Mode:Broadcast(state, now)
 		state.session = self.live and self.current or nil
+		state.rules = self.live and state.phase ~= "idle" and self.live._boardRules or nil
+		state.placed = self.live and state.phase == "lobby" and self.live._placedStart or nil
 		self.lastState = state
 		self.lastBroadcast = now or CurTime()
 		self.lastStates = self.lastStates or {}
-		self.lastStates[state.session or "only"] = state.phase ~= "idle" and { state = state, at = self.lastBroadcast } or nil
+		self.lastStates[state.session or "only"] = state.phase ~= "idle" and { state = state, at = self.lastBroadcast, made = self.lastBroadcast } or nil
 		net.Start(self.NET_STATE)
 		net.WriteString(Encode(state))
 		net.Broadcast()
@@ -237,6 +413,54 @@ if SERVER then
 	function Mode:OnPlayerLeave(fn) self.leaveHandler = fn end
 	function Mode:OnDisallowed(fn) self.disallowedHandler = fn end
 
+	-- turn games: who goes after order[index] (an entity index; nil when
+	-- that was the last turn, or there's nobody else)
+	function M.UpNext(order, index, wrap)
+		if not order or #order < 2 or not index or index < 1 then return nil end
+		local i = index + 1
+		if i > #order then
+			if not wrap then return nil end
+			i = 1
+		end
+		local p = order[i]
+		return IsValid(p) and p:EntIndex() or nil
+	end
+
+	-- turn games: everyone taking part but the active player stays put while
+	-- they watch (on), or everyone's free (off)
+	function M.FreezeWatchers(players, active, on)
+		for _, p in ipairs(players or {}) do
+			if IsValid(p) then p:Freeze(on and p ~= active) end
+		end
+	end
+
+	-- someone hosting or joining can't skate here (not allowed, or no working
+	-- Skater mode: m.canSkate from their client): told why, true
+	function Mode:CantSkate(ply, m, verb)
+		if not M.Allowed(ply) then self:Tell(ply, "you're not allowed to skate on this server") return true end
+		if not m.canSkate then self:Tell(ply, "you need Skater mode working (the module and your data) to " .. verb) return true end
+		return false
+	end
+
+	-- the usual wiring of a mode's commands: handlers[cmd](ply, m, now), refused
+	-- while the mode is turned off (all but "leave"); turned off mid-game, the
+	-- game stops; someone joining the server mid-game gets the state. Returns
+	-- the command function (tests call it directly).
+	function Mode:Serve(S, handlers, stop, broadcast)
+		local mode = self
+		local function Command(ply, m, now)
+			local h = type(m) == "table" and handlers[m.cmd]
+			if h and not mode:Allowed() and m.cmd ~= "leave" then return mode:Tell(ply, mode.title .. " is turned off on this server") end
+			if h then h(ply, m, now or CurTime()) end
+		end
+		self:OnCommand(function(ply, m) Command(ply, m) end)
+		self:OnDisallowed(function() if S.phase ~= "idle" then stop(mode.title .. " was turned off on this server") end end)
+		self:OnPlayerJoin(function(ply)
+			if S.phase ~= "idle" then timer.Simple(3, function() if IsValid(ply) then broadcast() end end) end
+		end)
+		return Command
+	end
+
 	function Mode:HandleCommand(ply, len, text, now)
 		if len and len > (self.maxBits or M.CMD_MAX_BITS) then return false end
 		-- (a bucket per player: refills at CMD_RATE a second, holds CMD_BURST.
@@ -251,6 +475,14 @@ if SERVER then
 		b.tokens = b.tokens - 1
 		local m = Decode(text)
 		if not m or not self.commandHandler then return false end
+		if m.cmd == "_invite" and self.live then
+			local inMode, inKey = M.SessionOf(ply)
+			if inMode ~= self then self:Tell(ply, "you're not in a game to invite anyone to") return true end
+			self:Enter(inKey)
+			self:Invite(ply, m)
+			self:Settle()
+			return true
+		end
 		if not self.live then
 			self.commandHandler(ply, m, CurTime())
 			return true
@@ -259,6 +491,11 @@ if SERVER then
 		if key == false then return true end
 		self:Enter(key)
 		self.commandHandler(ply, m, CurTime())
+		if m.cmd == "create" and self.live.phase ~= "idle" and self.live.host == ply and self.live._boardRules == nil and self.live._placedStart == nil then
+			self.live._boardRules = M.CleanRules(m.rules)
+			self.live._placedStart = type(m._start) == "table" and m._start.placed == true and M.CleanStart(m._start) or nil
+			if self.live._boardRules or self.live._placedStart then self:Broadcast(self.lastState or { phase = self.live.phase }) end
+		end
 		self:Settle()
 		return true
 	end
@@ -324,7 +561,7 @@ else
 	-- ones: minigame messages are shifted on the way out and back in. The
 	-- forms the modes use: Vectors, {x, y, z(, r)} under a position key,
 	-- tables with x / y / z numbers, flat x, y, z lists under "p".
-	M.POINT_KEYS = { pos = true, centre = true, center = true, start = true, finish = true, spot = true, area = true }
+	M.POINT_KEYS = { pos = true, centre = true, center = true, start = true, finish = true, spot = true, area = true, target = true }
 	M.FLAT_KEYS = { p = true }
 	local vecMeta = getmetatable(Vector(0, 0, 0))
 	local function IsVec(v) return (isvector and isvector(v)) or (vecMeta ~= nil and getmetatable(v) == vecMeta) end
@@ -386,6 +623,20 @@ else
 	function M.FromAbs(t) local o = M.FrameOffset() if not o then return t end return M.ShiftPositions(t, -o) end
 
 	function Mode:Send(cmd)
+		if type(cmd) == "table" and cmd.cmd == "create" and self.pendingRules then
+			cmd.rules, self.pendingRules = self.pendingRules, nil
+		end
+		-- (the Start goes with create; modes that send their own spot get it too)
+		if type(cmd) == "table" and cmd.cmd == "create" and self.pendingStart then
+			local s = self.pendingStart
+			self.pendingStart = nil
+			cmd._start = { pos = { s.pos.x, s.pos.y, s.pos.z }, yaw = s.yaw, placed = s.placed or nil }
+			if s.placed then
+				if type(cmd.pos) == "table" then cmd.pos = { s.pos.x, s.pos.y, s.pos.z } end
+				if cmd.x ~= nil and cmd.y ~= nil and cmd.z ~= nil then cmd.x, cmd.y, cmd.z = s.pos.x, s.pos.y, s.pos.z end
+				if cmd.yaw ~= nil then cmd.yaw = s.yaw end
+			end
+		end
 		net.Start(self.NET_CMD)
 		net.WriteString(Encode(M.ToAbs(cmd)))
 		net.SendToServer()
@@ -410,8 +661,13 @@ else
 		self.texts[st.session or "only"] = st.phase ~= "idle" and text or nil
 		st = M.FromAbs(st)
 		if st.session == nil then
+			local prev = self.state
 			self.state = st
+			local ok, mine = pcall(function() return st.phase ~= "idle" and (self:IsHost(st) or self:Me(st) ~= nil) end)
+			mine = ok and mine
+			if M.RELEASED[st.phase] and (prev and prev.phase) ~= st.phase then self:ReleaseHolds() end
 			if self.stateHandler then self.stateHandler(st, now) end
+			if M.polish and (mine or (prev and prev.phase ~= "idle" and st.phase == "idle")) then M.polish.Observe(self, prev, st, now) end
 			return true
 		end
 		-- several games: every one is listed (the Join menu); the mode itself
@@ -422,12 +678,18 @@ else
 		local mine = st.phase ~= "idle" and (self:IsHost(st) or self:Me(st) ~= nil)
 		if mine then
 			self.mySession = key
+			local prev = self.state
+			local before = prev and prev.phase
 			self.state = st
+			if M.RELEASED[st.phase] and before ~= st.phase then self:ReleaseHolds() end
 			if self.stateHandler then self.stateHandler(st, now) end
+			if M.polish then M.polish.Observe(self, prev, st, now) end
 		elseif key == self.mySession then
 			self.mySession = nil
 			self.state = { phase = "idle" }
+			self:ReleaseHolds()
 			if self.stateHandler then self.stateHandler(self.state, now) end
+			if M.polish then M.polish.Observe(self, nil, self.state, now) end
 		end
 		return true
 	end
@@ -453,9 +715,177 @@ else
 		return out
 	end
 
+	-- the no-zone on the ground: red, hatched with dark red lines
+	M.NO_ZONE_RED, M.NO_ZONE_STRIPE, M.NO_ZONE_STRIPES, M.NO_ZONE_SEGMENTS = Color(220, 40, 40, 110), Color(110, 0, 0, 230), 48, 64
+	local zoneMat
+	function M.DrawNoZone(centre, inner, outer, z)
+		if not (outer and outer > inner and mesh and render) then return end
+		zoneMat = zoneMat or CreateMaterial("skategm_nozone", "UnlitGeneric", { ["$basetexture"] = "color/white", ["$vertexcolor"] = 1, ["$vertexalpha"] = 1, ["$translucent"] = 1, ["$nocull"] = 1 })
+		render.SetMaterial(zoneMat)
+		local n, c = M.NO_ZONE_SEGMENTS, M.NO_ZONE_RED
+		mesh.Begin(MATERIAL_QUADS, n)
+		for k = 0, n - 1 do
+			local a0, a1 = k / n * math.pi * 2, (k + 1) / n * math.pi * 2
+			local c0, s0, c1, s1 = math.cos(a0), math.sin(a0), math.cos(a1), math.sin(a1)
+			for _, v in ipairs({ { c0 * inner, s0 * inner }, { c0 * outer, s0 * outer }, { c1 * outer, s1 * outer }, { c1 * inner, s1 * inner } }) do
+				mesh.Position(Vector(centre.x + v[1], centre.y + v[2], z))
+				mesh.Color(c.r, c.g, c.b, c.a)
+				mesh.AdvanceVertex()
+			end
+		end
+		mesh.End()
+		render.SetColorMaterial()
+		local skew = (outer - inner) / math.max(outer, 1)
+		for k = 0, M.NO_ZONE_STRIPES - 1 do
+			local a = k / M.NO_ZONE_STRIPES * math.pi * 2
+			local p0 = Vector(centre.x + math.cos(a) * inner, centre.y + math.sin(a) * inner, z + 0.5)
+			local p1 = Vector(centre.x + math.cos(a + skew) * outer, centre.y + math.sin(a + skew) * outer, z + 0.5)
+			render.DrawBeam(p0, p1, 5, 0, 1, M.NO_ZONE_STRIPE)
+		end
+	end
+
+	-- where a skater's hips are drawn this frame (me too): for things that
+	-- follow a skater on screen, so they move with them instead of jittering
+	function M.DrawnHips(ent)
+		local a = M.API()
+		local ply = ent == LocalPlayer():EntIndex() and LocalPlayer() or Entity(ent)
+		local P = a and a.PoseOf and IsValid(ply) and a.PoseOf(ply)
+		return P and P.HIPS or nil
+	end
+
+	-- a mode done with the camera it took (owner: what it was set under):
+	-- whatever was showing before comes back (the spectator's, the player's own)
+	-- recording runs on every client (poses reach every player): C.clips[ent]
+	-- = { { t, P }, ... } from C.recStart, rate frames a second. keep: the
+	-- other clips stay (Copycat keeps the setter's while the copies record)
+	function M.StartRecording(C, ents, now, keep)
+		if not keep or not C.clips then C.clips = {} end
+		C.recStart, C.nextRec, C.recording = now, now, {}
+		for _, ent in ipairs(ents) do
+			C.clips[ent] = {}
+			C.recording[#C.recording + 1] = ent
+		end
+	end
+
+	-- skip(ent): not this one now; extra(ent): a state kept with the frame
+	function M.RecordPoses(C, rate, now, skip, extra)
+		if not C.recStart or now < (C.nextRec or 0) then return end
+		C.nextRec = now + 1 / rate
+		local a = M.API()
+		if not (a and a.PoseOf) then return end
+		local me = LocalPlayer():EntIndex()
+		for _, ent in ipairs(C.recording or {}) do
+			local clip = C.clips[ent]
+			local ply = clip and not (skip and skip(ent)) and (ent == me and LocalPlayer() or Entity(ent)) or nil
+			local P = ply and IsValid(ply) and a.PoseOf(ply)
+			if P and P.HIPS then
+				local c = {}
+				for k, v in pairs(P) do c[k] = Vector(v.x, v.y, v.z) end
+				clip[#clip + 1] = { t = now - C.recStart, P = c, state = extra and extra(ent) or nil }
+			end
+		end
+	end
+
+	-- the replay camera: behind whoever is watched (C.watch = { target }),
+	-- back units behind and up above; hold: no pose, the last view stays
+	function M.ChaseWatch(C, target, owner, back, up, hold)
+		local a = M.API()
+		C.watch = target and { target = target } or nil
+		if a and a.SetView then
+			if target then a.SetView(function(_, _, fov) return M.ChaseView(C, fov, back, up, hold) end, owner) else M.GiveViewBack(owner) end
+		end
+	end
+
+	function M.ChaseView(C, fov, back, up, hold)
+		local w = C.watch
+		local a = M.API()
+		local P = w and a and a.PoseOf(w.target)
+		if not (P and P.HIPS) then return hold and w and w.pos and { origin = w.pos, angles = w.ang, fov = fov } or nil end
+		local target = P.HIPS + Vector(0, 0, 10)
+		if w.last then
+			local moved = target - w.last
+			moved.z = 0
+			if moved:LengthSqr() > 0.25 then w.dir = LerpVector(0.08, w.dir or moved:GetNormalized(), moved:GetNormalized()) end
+		end
+		w.last = target
+		local dir = w.dir or Vector(1, 0, 0)
+		local want = target - dir:GetNormalized() * (back or 160) + Vector(0, 0, up or 64)
+		w.pos = w.pos and LerpVector(0.12, w.pos, want) or want
+		w.ang = (target - w.pos):Angle()
+		return { origin = w.pos, angles = w.ang, fov = fov }
+	end
+
+	function M.GiveViewBack(owner)
+		local a = M.API()
+		if a and a.SetView then a.SetView(nil, owner) end
+	end
+
+	-- while a game runs where players share a spot or take over from each
+	-- other: only who I watch is drawn and nobody is solid to me (hidden flags
+	-- reach everyone late: a teleport onto the start met the others there)
+	function Mode:KeepApart(on)
+		on = on and true or false
+		local a = M.API()
+		if not a then return end
+		if a.HideOthers then a.HideOthers(on, self.id .. "_apart") end
+		if a.SetPlayerCollision then if on then a.SetPlayerCollision(false, self.id .. "_apart") else a.SetPlayerCollision(nil, self.id .. "_apart") end end
+	end
+
+	-- nobody solid to me while on (others still drawn): games where everyone skates at once
+	function Mode:NoCollide(on)
+		on = on and true or false
+		local a = M.API()
+		if not a then return end
+		if a.SetPlayerCollision then if on then a.SetPlayerCollision(false, self.id .. "_solid") else a.SetPlayerCollision(nil, self.id .. "_solid") end end
+	end
+
 	-- playing a minigame right now (not its lobby or results): no respawning
 	-- or teleporting then
 	function M.Playing() return M.InPlay(select(2, M.MyGame())) end
+
+	-- who's in a game that's being played: entity index -> that game (mode id
+	-- and session), from the states every client already gets (refreshed a
+	-- few times a second, it's asked every frame)
+	M.PLAY_MAP_EVERY = 0.25
+	function M.PlayMap(now)
+		now = now or RealTime()
+		if M.playMap and now - (M.playMapAt or -1) < M.PLAY_MAP_EVERY then return M.playMap end
+		local map, out = {}, {}
+		local function add(mode, key, st)
+			if not M.InPlay(st) then return end
+			local game = mode.id .. ":" .. tostring(key)
+			for _, p in ipairs(st.players or {}) do
+				if p.ent then
+					map[p.ent] = game
+					if p.out == true or p.alive == false then out[p.ent] = true end
+				end
+			end
+		end
+		for _, mode in pairs(M.modes) do
+			if mode.seen then
+				for key, entry in pairs(mode.seen) do
+					if now - entry.at < 3 then add(mode, key, entry.st) end
+				end
+			end
+			if mode.state then add(mode, mode.mySession or "only", mode.state) end
+		end
+		M.playMap, M.playOut, M.playMapAt = map, out, now
+		return map, out
+	end
+
+	-- how another player is kept apart from me: "hide" (I'm playing a game
+	-- they're not in: unseen, I pass through them), "ghost" (they're playing
+	-- one and I'm not: see-through, I pass through them), or nil
+	function M.Separation(ply)
+		if not (IsValid(ply) and ply.EntIndex) then return nil end
+		local map, out = M.PlayMap()
+		out = out or M.playOut or {}
+		local me = LocalPlayer():EntIndex()
+		local mine, theirs = map[me], map[ply:EntIndex()]
+		-- (someone out of my game, while I'm still in it, is gone too)
+		if mine then return (theirs ~= mine or (out[ply:EntIndex()] and not out[me])) and "hide" or nil end
+		return theirs and "ghost" or nil
+	end
 
 	-- the game I'm in, in any mode (host or player)
 	function M.MyGame()
@@ -469,18 +899,28 @@ else
 	-- shows them) - or, where Skater mode stays on (the SkateGM gamemode),
 	-- the skater frozen and the camera given to view(). Call it with each
 	-- state; it only acts when watching changes.
+	function Mode:Spectate(ents, opts)
+		local SP = M.spectate
+		self.spectating = (ents and #ents > 0) and ents or nil
+		-- (a list, even an empty one, means it isn't my go: my skater waits
+		-- frozen, rather than riding off unseen when there's nobody to watch)
+		self:Wait(ents ~= nil)
+		if not (SP and SP.Start) then return end
+		if self.spectating then SP.Start(self, ents, opts) elseif SP.owner == self then SP.Stop() end
+	end
+
 	function Mode:Watch(watching, view)
 		local a = M.API()
 		if not a then return end
 		if a.IsLocked and a.IsLocked() then
 			if watching and not self.watching then
 				self.watching = true
-				if a.Freeze then a.Freeze(true) end
-				if a.SetView then a.SetView(view) end
+				if a.Freeze then a.Freeze(true, self.id .. "_watch") end
+				if a.SetView then a.SetView(view, self.id .. "_watch") end
 			elseif not watching and self.watching then
 				self.watching = nil
-				if a.SetView then a.SetView(nil) end
-				if a.Freeze then a.Freeze(false) end
+				if a.SetView then a.SetView(nil, self.id .. "_watch") end
+				if a.Freeze then a.Freeze(false, self.id .. "_watch") end
 			end
 		elseif watching and (a.IsSkating() or a.IsLoading()) then
 			a.StopSkating()
@@ -536,6 +976,26 @@ if SERVER then
 else
 	function M.CanSkate() local a = M.API() return a ~= nil and a.CanSkate() end
 
+	-- the start marker: a gate across the start and an arrow the way to go
+	M.START_COLOR = Color(120, 220, 255)
+	function M.DrawStartMarker(pos, yaw, alpha)
+		if not (render and render.SetColorMaterial) then return end
+		render.SetColorMaterial()
+		local c = M.START_COLOR
+		local col = Color(c.r, c.g, c.b, 220 * (alpha or 1))
+		local r0 = math.rad(yaw or 0)
+		local fwd, right = Vector(math.cos(r0), math.sin(r0), 0), Vector(math.sin(r0), -math.cos(r0), 0)
+		local a, b = pos - right * 40, pos + right * 40
+		render.DrawBox(a, angle_zero, Vector(-1.5, -1.5, 0), Vector(1.5, 1.5, 64), col)
+		render.DrawBox(b, angle_zero, Vector(-1.5, -1.5, 0), Vector(1.5, 1.5, 64), col)
+		render.DrawBeam(a + Vector(0, 0, 64), b + Vector(0, 0, 64), 3, 0, 1, col)
+		local base = pos + Vector(0, 0, 3)
+		local tip = base + fwd * 80
+		render.DrawBeam(base, tip, 6, 0, 1, col)
+		render.DrawBeam(tip, tip - fwd * 24 + right * 18, 6, 0, 1, col)
+		render.DrawBeam(tip, tip - fwd * 24 - right * 18, 6, 0, 1, col)
+	end
+
 	function M.Here()
 		local a = M.API()
 		local p = a and a.SkaterPos and a.SkaterPos()
@@ -556,7 +1016,259 @@ else
 
 	function Mode:IsHost(st) return st.host ~= nil and st.host ~= 0 and st.host == LocalPlayer():EntIndex() end
 
-	function Mode:Host(def) self.hostDef = def end
+	function Mode:LobbyLines(fn) self.lobbyLines = fn end
+	M.LOBBY_ROWS = 10
+
+	-- the lobby, the same for every mode: who's in, who hosts, what to press
+	function M.LobbyRows(mode, st)
+		local me = LocalPlayer():EntIndex()
+		local rows = { title = string.upper(mode.title), about = mode.hostDef and mode.hostDef.about, players = {}, lines = {} }
+		local list = st.players or {}
+		for i, p in ipairs(list) do
+			if i > M.LOBBY_ROWS then
+				rows.players[#rows.players + 1] = { name = "+" .. (#list - M.LOBBY_ROWS) .. " more" }
+				break
+			end
+			rows.players[#rows.players + 1] = { name = p.name or "?", host = p.ent == st.host, me = p.ent == me }
+		end
+		if mode.lobbyLines then
+			local ok, extra = pcall(mode.lobbyLines, st)
+			if ok and type(extra) == "table" then for _, l in ipairs(extra) do rows.lines[#rows.lines + 1] = l end end
+		end
+		if st.rules then
+			if st.rules.rocket == false then rows.lines[#rows.lines + 1] = "no rocket board" end
+			if st.rules.rocket == "force" then rows.lines[#rows.lines + 1] = "rocket boards on" end
+			if st.rules.rocket == "on" then rows.lines[#rows.lines + 1] = st.rules.fuel and string.format("rocket boards: %d s of fuel", st.rules.fuel) or "rocket boards on" end
+			if st.rules.hover == false then rows.lines[#rows.lines + 1] = "no hoverboard" end
+		end
+		local n, min = #rows.players, mode.minPlayers or 1
+		local hostName
+		for _, p in ipairs(rows.players) do if p.host then hostName = p.name end end
+		if n < min then
+			rows.hint = string.format("waiting for %d more player%s (%d / %d)", min - n, min - n == 1 and "" or "s", n, min)
+		elseif mode:IsHost(st) then
+			rows.hint, rows.ready = "ready: LB + D-pad left to start", true
+		else
+			rows.hint, rows.ready = "ready: waiting for " .. (hostName or "the host") .. " to start", true
+		end
+		return rows
+	end
+
+	function M.TextWidth(text, font)
+		if not (surface and surface.SetFont and surface.GetTextSize) then return 0 end
+		surface.SetFont(font)
+		local PAD = SKATEGM_UI and SKATEGM_UI.pad
+		local tw = surface.GetTextSize(PAD and PAD.T and PAD.T(text) or text)
+		return tw or 0
+	end
+
+	function M.Wrap(text, font, maxW)
+		if M.TextWidth(text, font) <= maxW then return { text } end
+		local out, cur = {}, ""
+		for word in tostring(text):gmatch("%S+") do
+			local try = cur == "" and word or (cur .. " " .. word)
+			if cur ~= "" and M.TextWidth(try, font) > maxW then
+				out[#out + 1] = cur
+				cur = word
+			else
+				cur = try
+			end
+		end
+		if cur ~= "" then out[#out + 1] = cur end
+		return out
+	end
+
+	-- a menu is open (the minigame menu, settings, the map, replays, the park
+	-- editor): game HUDs step aside for it. (A minigame's own screen, like
+	-- Freeze Frame's photo, isn't one)
+	M.MENU_SCREENS = { minigames = true, settings = true, map = true, replay = true, editor = true }
+	function M.HudHidden()
+		local UI = SKATEGM_UI
+		return UI ~= nil and UI.open ~= nil and M.MENU_SCREENS[UI.open] == true
+	end
+
+	-- a line too wide for the screen is drawn smaller to fit
+	M.TEXT_MAX = 0.94
+
+	function M.DrawLobby(w, h)
+		if M.HudHidden() then return end
+		local mode, st = M.MyGame()
+		if not (mode and st and st.phase == "lobby") then return end
+		local rows = M.LobbyRows(mode, st)
+		local PAD = SKATEGM_UI and SKATEGM_UI.pad
+		if PAD and PAD.Fonts then PAD.Fonts() end
+		local big, small = PAD and "skategm_ui_title" or "DermaLarge", PAD and "skategm_ui_row" or "DermaDefaultBold"
+		local x, y, line = w * 0.02, h * 0.22, h * 0.03
+		local col = mode.color or Color(255, 210, 90)
+		local maxW = w * 0.4
+		local lines = {}
+		for _, l in ipairs(rows.lines) do
+			for _, piece in ipairs(M.Wrap(l, small, maxW)) do lines[#lines + 1] = piece end
+		end
+		local about = rows.about and M.Wrap(rows.about, small, maxW) or {}
+		local widest = math.max(w * 0.24 - 20, M.TextWidth(rows.title, big), M.TextWidth(rows.hint, small))
+		for _, l in ipairs(about) do widest = math.max(widest, M.TextWidth(l, small)) end
+		for _, p in ipairs(rows.players) do widest = math.max(widest, M.TextWidth(p.name .. "  (host)", small)) end
+		for _, l in ipairs(lines) do widest = math.max(widest, M.TextWidth(l, small)) end
+		local count = #rows.players + #lines + (#about > 0 and #about + 0.5 or 0)
+		if draw and draw.RoundedBox then draw.RoundedBox(8, x - 10, y - 8, widest + 20, line * (count + 4.6), Color(0, 0, 0, 170)) end
+		M.Text(rows.title, big, x, y, col, TEXT_ALIGN_LEFT)
+		y = y + line * 1.6
+		for _, l in ipairs(about) do
+			M.Text(l, small, x, y, Color(225, 225, 225), TEXT_ALIGN_LEFT)
+			y = y + line
+		end
+		if #about > 0 then y = y + line * 0.5 end
+		for _, p in ipairs(rows.players) do
+			M.Text(p.name .. (p.host and "  (host)" or ""), small, x, y, p.me and col or color_white, TEXT_ALIGN_LEFT)
+			y = y + line
+		end
+		for _, l in ipairs(lines) do
+			M.Text(l, small, x, y, Color(190, 190, 190), TEXT_ALIGN_LEFT)
+			y = y + line
+		end
+		M.Text(rows.hint, small, x, y + line * 0.3, rows.ready and Color(140, 230, 140) or Color(200, 200, 200), TEXT_ALIGN_LEFT)
+	end
+	if hook and hook.Add then hook.Add("HUDPaint", "skategm_modes_lobby", function() M.DrawLobby(ScrW(), ScrH()) end) end
+
+	-- a game's boundary wall: outside it the screen fades to black; back
+	-- inside before it's black, nothing happened. Fully black: the game's
+	-- penalty (out(), e.g. the melon dropped, eliminated) and back to the
+	-- start. fn(st) -> { area = { x, y, z, radius }, pos, yaw, out } while it applies
+	M.BOUNDARY_FADE = 3
+	function Mode:Boundary(fn) self.boundaryFn = fn end
+
+	function M.BoundaryThink(now)
+		local B = M.boundary
+		local mode, st = M.MyGame()
+		local ok, b = false, nil
+		if mode and mode.boundaryFn and M.InPlay(st) then ok, b = pcall(mode.boundaryFn, st) end
+		local a = M.API()
+		local pos = a and a.SkaterPos and a.SkaterPos()
+		if not (ok and b and b.area and pos and a.IsSkating and a.IsSkating()) then
+			M.boundary = nil
+			return
+		end
+		local ar = b.area
+		local outside = (pos.x - ar[1]) ^ 2 + (pos.y - ar[2]) ^ 2 > ar[4] ^ 2
+		if not outside then
+			M.boundary = nil
+			return
+		end
+		B = B or { since = now }
+		M.boundary = B
+		if now - B.since < M.BOUNDARY_FADE then return end
+		M.boundary = nil
+		if b.out then pcall(b.out) end
+		if b.pos and a.TeleportTo and a.TeleportTo(b.pos, b.yaw or 0) and M.polish then M.polish.Fade(now) end
+		if a.Say then a.Say("out of bounds: back to the start") end
+	end
+
+	-- how far into the fade (0-1), for the black and the warning
+	function M.BoundaryFade(now)
+		local B = M.boundary
+		return B and math.Clamp((now - B.since) / M.BOUNDARY_FADE, 0, 1) or 0
+	end
+
+	function M.DrawBoundary(w, h, now)
+		local k = M.BoundaryFade(now)
+		if k <= 0 then return end
+		surface.SetDrawColor(0, 0, 0, 255 * k)
+		surface.DrawRect(0, 0, w, h)
+		local PAD = SKATEGM_UI and SKATEGM_UI.pad
+		if PAD and PAD.Fonts then PAD.Fonts() end
+		M.Text(string.format("OUT OF BOUNDS: GET BACK IN  %.1f", math.max(0, M.BOUNDARY_FADE * (1 - k))), PAD and "skategm_ui_title" or "DermaLarge", w / 2, h * 0.45, Color(255, 120, 100), TEXT_ALIGN_CENTER, 2)
+	end
+	if hook and hook.Add then
+		hook.Add("Think", "skategm_modes_boundary", function() M.BoundaryThink(RealTime()) end)
+		hook.Add("HUDPaint", "skategm_modes_boundary", function() M.DrawBoundary(ScrW(), ScrH(), RealTime()) end)
+	end
+
+	function Mode:Host(def)
+		if def.boardRules ~= false and not def.wrappedRules then
+			def.wrappedRules = true
+			def.options = def.options or {}
+			local have = {}
+			for _, o in ipairs(def.options) do have[o.key] = true end
+			for _, o in ipairs(M.BOARD_OPTIONS) do
+				if not have[o.key] and not (o.key == "_rocket" and def.rocket == "force") then def.options[#def.options + 1] = o end
+			end
+			local start = def.start
+			def.start = function(v, mode)
+				local rk = v._rocket
+				local on = rk == true or (type(rk) == "number" and rk ~= 0)
+				mode.pendingRules = { rocket = def.rocket == "force" and "force" or (on and "on" or false), fuel = def.rocket ~= "force" and M.CleanFuel(rk) or nil, hover = v._hover == true and "on" or false }
+				return start(v, mode)
+			end
+		end
+		if def.useStart ~= false and not def.wrappedStart then
+			def.wrappedStart = true
+			def.options = def.options or {}
+			local o = {}
+			for k, val in pairs(M.START_OPTION) do o[k] = val end
+			o.draw = function(obj, alpha) M.DrawStartMarker(obj.pos, (obj.yaw + 180) % 360, alpha) end
+			o.summary = function() return "placed" end
+			table.insert(def.options, 1, o)
+			local start = def.start
+			def.start = function(v, mode)
+				local s = v._start
+				local resolved
+				if s then
+					resolved = { pos = s.pos, yaw = (s.yaw + 180) % 360, placed = true }
+				else
+					local a = M.API()
+					local view = a and a.View and a.View()
+					local me = LocalPlayer()
+					local yaw = view and view.angles and view.angles.y or (me.EyeAngles and me:EyeAngles().y) or 0
+					resolved = { pos = M.Here(), yaw = yaw }
+				end
+				v._start = resolved
+				mode.pendingStart = resolved
+				return start(v, mode)
+			end
+		end
+		self.hostDef = def
+	end
+
+	-- the board rules of the game a player is playing (nil: no game, or no rules)
+	function M.RulesFor(ply)
+		local ent = IsValid(ply) and ply.EntIndex and ply:EntIndex()
+		if not ent then return nil end
+		local function has(st)
+			if not (st and st.rules and M.InPlay(st)) then return false end
+			for _, p in ipairs(st.players or {}) do if p.ent == ent then return true end end
+			return false
+		end
+		for _, mode in pairs(M.modes) do
+			if has(mode.state) then return mode.state.rules end
+			for _, entry in pairs(mode.seen or {}) do if has(entry.st) then return entry.st.rules end end
+		end
+	end
+	-- before the go (a countdown, getting to the start): no rocket, so nobody
+	-- builds up speed on the line
+	M.STARTING_PHASES = { countdown = true, prep = true, leadcount = true, copycount = true }
+	function M.Starting(ply)
+		if not (IsValid(ply) and ply == LocalPlayer()) then return false end
+		local _, st = M.MyGame()
+		return st ~= nil and M.STARTING_PHASES[st.phase] == true
+	end
+	function M.RocketAllowed(ply)
+		if M.Starting(ply) then return false end
+		local r = M.RulesFor(ply)
+		return r == nil or r.rocket ~= false
+	end
+	function M.RocketForced(ply) local r = M.RulesFor(ply) return r ~= nil and r.rocket == "force" and not M.Starting(ply) end
+	function M.RocketOn(ply) local r = M.RulesFor(ply) return r ~= nil and (r.rocket == "on" or r.rocket == "force") end
+	-- the game's rocket fuel for this player: seconds, nil (infinite), or
+	-- false (no game rule: their own setting decides)
+	function M.RocketFuel(ply)
+		local r = M.RulesFor(ply)
+		if r and r.rocket == "on" then return r.fuel end
+		if r and r.rocket == "force" then return nil end
+		return false
+	end
+	function M.HoverAllowed(ply) local r = M.RulesFor(ply) return r == nil or r.hover ~= false end
+	function M.HoverOn(ply) local r = M.RulesFor(ply) return r ~= nil and r.hover == "on" end
 
 	function Mode:HoldAtStart(holding, pos, yaw, now)
 		local a = M.API()
@@ -565,15 +1277,88 @@ else
 			if not self.holdPlaced and now >= (self.nextHoldTry or 0) then
 				self.nextHoldTry = now + 0.3
 				if a.TeleportTo(pos, yaw) then
+					if M.polish then M.polish.Fade(now) end
 					self.holdPlaced = true
-					if a.Freeze then a.Freeze(true) end
+					if a.Freeze then a.Freeze(true, self.id .. "_hold") end
 				end
 			end
 		elseif self.holdPlaced then
 			self.holdPlaced, self.nextHoldTry = nil, nil
-			if a.Freeze then a.Freeze(false) end
+			if a.Freeze then a.Freeze(false, self.id .. "_hold") end
 		end
 	end
+
+	-- my turn just ended (st.last.ent is me): I stay where I am, in control
+	-- (goof off in the bail), until the next one starts
+	function M.JustDone(st) return st.phase == "between" and st.last ~= nil and st.last.ent == LocalPlayer():EntIndex() end
+
+	-- my turn's prep, every frame (C.prep set when it began; C.IsMine): held
+	-- at the start through prep and the countdown; once skating, moved there,
+	-- and "ready" sent after settle seconds. True while it's my prep.
+	function Mode:TurnPrep(C, st, a, now, pos, yaw, settle)
+		local mine = C.IsMine(st)
+		self:HoldAtStart(mine and a.IsSkating() and (st.phase == "countdown" or (st.phase == "prep" and C.prep ~= nil and C.prep.teleported)), pos, yaw, now)
+		if not (st.phase == "prep" and mine and C.prep) then return false end
+		if a.IsSkating() and not C.prep.teleported and pos then
+			a.TeleportTo(pos, yaw)
+			C.prep.teleported, C.prep.at = true, now
+		end
+		if C.prep.teleported and not C.prep.readySent and now - C.prep.at > (settle or 0.5) then
+			C.prep.readySent = true
+			self:Send({ cmd = "ready" })
+		end
+		return true
+	end
+
+	-- waiting (not my turn, or done): my skater frozen and the controller
+	-- kept from it, whether or not there's anyone to watch
+	function Mode:Wait(waiting)
+		local a = M.API()
+		if not a or (waiting or false) == (self.waiting or false) then return end
+		self.waiting = waiting or nil
+		if a.Freeze then a.Freeze(waiting, self.id .. "_wait") end
+		if a.BlockInput then a.BlockInput(waiting, self.id .. "_wait") end
+	end
+
+	-- a game over (or back in its lobby, or I left): everything a mode holds
+	-- on my skater is let go, whatever its own code forgot
+	M.RELEASED = { idle = true, lobby = true, results = true }
+	function Mode:ReleaseHolds()
+		local a = M.API()
+		if not a then return end
+		self:Spectate(nil)
+		self:Wait(false)
+		self:HoldAtStart(false)
+		if self.watching then self:Watch(false) end
+		if a.ReleaseHolds then
+			a.ReleaseHolds(self.id)
+		else
+			if a.Freeze then a.Freeze(false, self.id) end
+			if a.BlockInput then a.BlockInput(false, self.id) end
+			if a.SetHidden then a.SetHidden(self.id, false) end
+		end
+	end
+
+	-- the safety net: in no game at all, nothing any game held stays held
+	-- (a mode whose own code stops running when its game closes - an early
+	-- return on "idle" - could leave its freeze, its camera or its hiding)
+	M.SWEEP_EVERY = 1
+	function M.Sweep(now)
+		if now < (M.nextSweep or 0) then return end
+		M.nextSweep = now + M.SWEEP_EVERY
+		if M.MyGame() then return end
+		local a = M.API()
+		if not a then return end
+		for id, mode in pairs(M.modes or {}) do
+			if a.ReleaseHolds then a.ReleaseHolds(id) end
+		end
+		for _, why in ipairs(M.SWEPT) do if a.ReleaseHolds then a.ReleaseHolds(why) end end
+		local SP = M.spectate
+		if SP and SP.on and SP.Stop then SP.Stop() end
+	end
+	-- holds that aren't a mode's but only make sense in a game (items)
+	M.SWEPT = { "items" }
+	if hook and hook.Add then hook.Add("Think", "skategm_modes_sweep", function() M.Sweep(RealTime()) end) end
 
 	function M.PosTable(v) return { v.x, v.y, v.z } end
 	function Mode:JoinInfo(fn) self.joinInfoFn = fn end
@@ -605,12 +1390,75 @@ else
 
 	function Mode:Leave() self:Send({ cmd = "leave" }) end
 
+	-- invites: a member of a game in its lobby asks the server to send one;
+	-- it lasts while that game is still in its lobby (LB + RT joins)
+	M.NET_INVITE = "skategm_modes_invite"
+	M.INVITE_TOAST = 8
+	function M.ReceiveInvite(id, session, from, now)
+		local mode = M.modes[id]
+		if not mode then return end
+		M.invite = { mode = id, session = tonumber(session) or (session ~= "" and session or nil), from = from, at = now or RealTime() }
+		mode:Say(from .. " invited you to " .. mode.title .. ": LB + RT to join")
+		if surface and surface.PlaySound then surface.PlaySound("buttons/button17.wav") end
+	end
+	if net and net.Receive then
+		net.Receive(M.NET_INVITE, function() M.ReceiveInvite(net.ReadString(), net.ReadString(), net.ReadString()) end)
+	end
+	function M.InviteState(inv)
+		local mode = inv and M.modes[inv.mode]
+		if not mode then return nil end
+		if inv.session ~= nil and mode.seen then
+			local entry = mode.seen[inv.session]
+			return mode, entry and entry.st
+		end
+		return mode, mode.lastSeenState or mode.state
+	end
+	function M.InviteActive()
+		local inv = M.invite
+		if not inv then return false end
+		local mode, st = M.InviteState(inv)
+		local mine = M.MyGame and M.MyGame()
+		if not (mode and st and st.phase == "lobby") or mine ~= nil then
+			M.invite = nil
+			return false
+		end
+		return true
+	end
+	function M.AcceptInvite()
+		if not M.InviteActive() then return end
+		local inv = M.invite
+		M.invite = nil
+		M.modes[inv.mode]:Join(inv.session)
+	end
+	function M.DrawInvite(w, h, now)
+		if M.HudHidden() then return end
+		local inv = M.invite
+		if not inv or (now - inv.at) > M.INVITE_TOAST or not M.InviteActive() then return end
+		local mode = M.modes[inv.mode]
+		local text = M.ButtonWords(inv.from .. " invited you to " .. mode.title .. "   LB + RT to join")
+		local PAD = SKATEGM_UI and SKATEGM_UI.pad
+		if PAD and PAD.Fonts then PAD.Fonts() end
+		local font = PAD and "skategm_ui_row" or "DermaDefaultBold"
+		surface.SetFont(font)
+		local tw = surface.GetTextSize(text)
+		local k = math.min(1, (M.INVITE_TOAST - (now - inv.at)) * 2)
+		draw.RoundedBox(8, w / 2 - tw / 2 - 16, h * 0.14, tw + 32, h * 0.05, Color(0, 0, 0, 200 * k))
+		M.Text(text, font, w / 2, h * 0.14 + h * 0.012, Color(255, 255, 255, 255 * k), TEXT_ALIGN_CENTER)
+	end
+	if hook and hook.Add then hook.Add("HUDPaint", "skategm_modes_invite", function() M.DrawInvite(ScrW(), ScrH(), RealTime()) end) end
+
+	function Mode:Restart()
+		self:Send({ cmd = "stop" })
+		self:Send({ cmd = "begin" })
+	end
+
 	function Mode:Actions()
 		if self.hostActionsFn then return self.hostActionsFn(self.state or {}) end
 		local mode = self
 		local st = self.state or {}
-		-- (in the lobby: start it or close it; once it's going: end the round,
-		-- back to the lobby with everyone still in, or close the whole game)
+		-- (in the lobby: start it or close it; once it's going: restart it -
+		-- back to its lobby and straight off again, same players and settings -
+		-- or close the whole game)
 		if st.phase == nil or st.phase == "lobby" then
 			return {
 				{ label = "Start the game", run = function() mode:Send({ cmd = "begin" }) end },
@@ -618,7 +1466,7 @@ else
 			}
 		end
 		return {
-			{ label = "End this round", sub = "back to the lobby, everyone still in", run = function() mode:Send({ cmd = "stop" }) end },
+			{ label = "Restart", sub = "start it again now: same players, same settings", run = function() mode:Restart() end },
 			{ label = "Close the game", sub = "ends it for everyone", run = function() mode:Send({ cmd = "stop", close = true }) end },
 		}
 	end
@@ -656,8 +1504,29 @@ else
 	function M.Text(t, font, x, y, col, ax, offset)
 		offset = offset or 2
 		t = M.ButtonWords(t)
+		local maxW = ScrW and ScrW() * M.TEXT_MAX
+		local tw = maxW and M.TextWidth(t, font) or 0
+		local fit = maxW and tw > maxW and Matrix and cam and cam.PushModelMatrix
+		if fit then
+			local s = maxW / tw
+			local m = Matrix()
+			m:Translate(Vector(x, y, 0))
+			m:Scale(Vector(s, s, 1))
+			m:Translate(Vector(-x, -y, 0))
+			cam.PushModelMatrix(m)
+		end
 		draw.SimpleText(t, font, x + offset, y + offset, shadow, ax or TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 		draw.SimpleText(t, font, x, y, col or color_white, ax or TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+		if fit then cam.PopModelMatrix() end
+	end
+
+	-- the entity indexes of the others in a game's player list (filter: which)
+	function M.Others(st, filter)
+		local me, out = LocalPlayer():EntIndex(), {}
+		for _, p in ipairs(st and st.players or {}) do
+			if p.ent ~= me and (not filter or filter(p)) then out[#out + 1] = p.ent end
+		end
+		return out
 	end
 
 	M.WALL_SEGMENTS = 96
@@ -698,7 +1567,10 @@ function M.Register(def)
 	mode.id = def.id
 	mode.title = def.title or def.id
 	mode.color = def.color or mode.color
+	mode.minPlayers = def.minPlayers or mode.minPlayers
 	mode.order = def.order or 100
+	mode.category = def.category or mode.category
+	mode.music = def.music or mode.music
 	mode.chat = (def.chat or ("!" .. def.id)):lower()
 	mode.NET_STATE = def.netState or ("skategm_mode_" .. def.id .. "_state")
 	mode.NET_CMD = def.netCommand or ("skategm_mode_" .. def.id .. "_cmd")
@@ -715,8 +1587,11 @@ function M.Register(def)
 	return mode
 end
 
-if SERVER then AddCSLuaFile("skategm_modes/cl_menu.lua") end
+if SERVER then AddCSLuaFile("skategm_modes/cl_menu.lua") AddCSLuaFile("skategm_modes/cl_spectate.lua") AddCSLuaFile("skategm_modes/cl_music.lua") AddCSLuaFile("skategm_modes/cl_polish.lua") AddCSLuaFile("skategm_modes/cl_spotgame.lua") end
 if CLIENT and not M.menu then include("skategm_modes/cl_menu.lua") end
+if CLIENT and not M.spectate then include("skategm_modes/cl_spectate.lua") end
+if CLIENT and not M.music then include("skategm_modes/cl_music.lua") end
+if CLIENT and not M.polish then include("skategm_modes/cl_polish.lua") end
 
 if not M.announced then
 	M.announced = true

@@ -38,7 +38,7 @@ local function st(phase, extra)
 end
 local function last() return sent[#sent] end
 
-check("Snake shows up in the controller menu's host list", SNAKE.mode.hostDef ~= nil and #SNAKE.mode.hostDef.options == 4)
+check("Snake shows up in the controller menu's host list", SNAKE.mode.hostDef ~= nil and #SNAKE.mode.hostDef.options == 7 and SNAKE.mode.hostDef.options[1].key == "_start")
 C.OnState(st("countdown"), 1)
 C.Think(1)
 check("countdown: on my own start spot, frozen there", #api.teleports == 1 and api.teleports[1][1].x == -500 and api.frozen == true)

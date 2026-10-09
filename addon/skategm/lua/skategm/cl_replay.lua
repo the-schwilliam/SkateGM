@@ -438,7 +438,7 @@ function R.MenuPage()
 				v.dirty = true
 				R.Note("all keyframes cleared")
 			end },
-			{ label = v.file and "Save" or "Save to my replays", sub = "keeps the keyframes and filter", run = function() R.SaveEdit() end },
+			{ label = v.file and "Save" or "Save to my replays", run = function() R.SaveEdit() end },
 			{ label = "Export video", sub = R.CanExport() and "renders it to a .webm file" or "not available in this copy of Garry's Mod",
 				disabled = not R.CanExport(), page = R.ExportPage },
 		}
@@ -574,7 +574,7 @@ function R.Paint(w, h)
 	if v.manual and #v.edit.keys > 0 then
 		draw.SimpleText("camera changed: Y sets it as a keyframe here", "skategm_replay_small", w / 2, y + h * 0.03, Color(255, 200, 70), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	end
-	UI.pad.Legend(R.Hints(), w, h, "bottom")
+	if not v.menu then UI.pad.Legend(R.Hints(), w, h, "bottom") end
 	local now = RealTime and RealTime() or 0
 	if v.note and now - v.note.t < 2.5 then
 		draw.SimpleText(v.note.text, "skategm_replay_mid", w / 2, h * 0.16, Color(120, 220, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
@@ -626,3 +626,5 @@ concommand.Add("skategm_replay", function(_, _, args)
 	end
 	if R.on then R.Close() else R.Open(S.RecentClip(), "Last 15 seconds") end
 end, nil, "Replay your last 15 seconds (or a saved replay: skategm_replay <name>)")
+
+include("skategm/cl_replay_loop.lua")

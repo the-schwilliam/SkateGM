@@ -46,6 +46,7 @@ mod grind_camera;
 mod grind_chromosome;
 mod grind_host;
 mod grind_materials;
+mod grind_trick; // gm_sk8 addition (ported)
 mod grind_names;
 mod ground_animation;
 mod slide_state;
@@ -456,6 +457,9 @@ impl GamePhysics {
             grind::post(self, skater)?;
         }
         wipeout::check_after_physics(self, skater)?;
+        if skater.player_state.current() == skate_core::player::state::PhysicalStateId::PhysicsAirSecondary {
+            grind_trick::post_velocity(self, skater);
+        }
         offboard::post_physics::advance(self, skater)?;
         let compression = skater.skeleton_output.average_compressions(&self.board);
         render_pose::publish(self, skater, compression)?;

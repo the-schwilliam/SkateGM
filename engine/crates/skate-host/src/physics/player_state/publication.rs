@@ -23,6 +23,7 @@ pub(super) fn publish(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             state,
             PhysicalStateId::PhysicsGround
                 | PhysicalStateId::PhysicsAir
+                | PhysicalStateId::PhysicsAirSecondary
                 | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
                 | PhysicalStateId::KnownAir
                 | PhysicalStateId::BipedAir

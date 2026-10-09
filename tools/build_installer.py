@@ -19,6 +19,8 @@ DLL = ROOT / 'gm_skategm' / 'prebuilt' / 'gmcl_skategm_win64.dll'
 PREBUILT = ROOT / 'gm_skategm' / 'prebuilt'
 EXTRAS = ['skategm_sdl2.dll', 'skategm_gamecontrollerdb.txt']
 EXTRA_LICENSES = ['SDL2-LICENSE.txt', 'SDL2-README.txt', 'SDL_GameControllerDB-LICENSE.txt']
+VGMSTREAM = PREBUILT / 'vgmstream'
+AEMS_RENDER = ROOT / 'engine' / 'target' / 'release' / 'examples' / 'aems_render.exe'
 SEP = ';' if sys.platform == 'win32' else ':'
 VERSION = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
 NAME = 'SkateGM-Setup-' + VERSION
@@ -69,6 +71,9 @@ def main():
         raise SystemExit(f'build the module first: {DLL} is missing')
     if not all((PREBUILT / n).is_file() for n in EXTRAS + EXTRA_LICENSES):
         raise SystemExit('SDL2 is missing: python tools/fetch_sdl.py')
+    run('cargo', 'build', '--release', '--manifest-path', ROOT / 'engine' / 'Cargo.toml', '-p', 'skate-audio', '--example', 'aems_render')
+    if not (VGMSTREAM / 'vgmstream-cli.exe').is_file():
+        raise SystemExit('vgmstream is missing: python tools/fetch_vgmstream.py')
     if not PY.is_file():
         venv.create(VENV, with_pip=True)
     run(PY, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', *PACKAGES)
@@ -81,13 +86,14 @@ def main():
         '-C', 'target-feature=+crt-static', ROOT / 'exporter' / 'tools' / 'asset_pipeline' / 'refpack_native.rs', '-o', refpack)
     licenses = work / 'licenses'
     licenses.mkdir()
-    for src, name in [('engine/LICENSE', 'engine-LICENSE.txt'), ('engine/NOTICE-mashup', 'engine-NOTICE.txt'),
+    for src, name in [('LICENSE', 'SkateGM-LICENSE.txt'), ('engine/LICENSE', 'engine-LICENSE.txt'), ('engine/NOTICE-mashup', 'engine-NOTICE.txt'),
                       ('LICENSE-THIRD-PARTY.md', 'README.md'), ('exporter/tools/vendor/utt/LICENSE', 'UTT.txt'),
                       ('exporter/tools/vendor/university/LICENSE-PROJECT.md', 'CustomEngineLayer.txt'),
                       ('exporter/tools/vendor/skate3_ui/LICENSE', 'skate3_ui.txt')]:
         shutil.copy2(ROOT / src, licenses / name)
     for name in EXTRA_LICENSES:
         shutil.copy2(PREBUILT / name, licenses / name)
+    shutil.copy2(VGMSTREAM / 'COPYING', licenses / 'vgmstream-COPYING.txt')
     out = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / 'release'
     version_file(work / 'version.txt')
     from PIL import Image
@@ -103,6 +109,8 @@ def main():
         '--add-binary', f'{PREBUILT / EXTRAS[0]}{SEP}payload',
         '--add-data', f'{PREBUILT / EXTRAS[1]}{SEP}payload',
         '--add-data', f'{licenses}{SEP}licenses',
+        '--add-data', f'{VGMSTREAM}{SEP}payload/vgmstream',
+        '--add-binary', f'{AEMS_RENDER}{SEP}payload',
         '--add-data', f'{ROOT / "VERSION"}{SEP}.',
         '--icon', work / 'icon.ico',
         '--exclude-module', 'bpy', '--exclude-module', 'mathutils',

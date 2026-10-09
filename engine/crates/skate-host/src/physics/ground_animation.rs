@@ -1,7 +1,7 @@
 //! GroundAnimation103 lifecycle82D33BF8/33DB8/33C70/34150, original Skate3TU3.
 mod board;
 mod settings;
-mod skeleton;
+pub(super) mod skeleton; // gm_sk8: visible to grind_trick
 use super::{GamePhysics, SkaterRuntime};
 pub(crate) use settings::GroundAnimationSettings;
 use skate_core::{

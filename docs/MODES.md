@@ -48,6 +48,9 @@ MYMODE.mode = SKATEGM_MODES.Register({
 	title = "My Mode",        -- shown in the Game modes list
 	order = 50,               -- position in that list (built-ins use 1-4)
 	-- optional:
+	category = "Party",       -- the Host list's group: "Tricks", "Sports", "Arena",
+	                          -- "Chaos", "Party", or a new name of your own
+	                          -- (listed after those); none = "Other"
 	chat = "!mm",             -- chat prefix (default "!" .. id)
 	allowed = false,          -- no "allowed on this server" switch
 	allowedDefault = false,   -- the switch starts off
@@ -120,7 +123,10 @@ input. Make a mode hostable there:
 
 ```lua
 mode:Host({
-	description = "shown under the mode's name",
+	description = "be first to the finish",  -- a short tagline, shown under the mode's name
+	about = "Everyone starts together. The first one to the finish line wins.",
+	                          -- a few plain sentences: beside the Host list,
+	                          -- on the options screen and in the lobby
 	options = {
 		{ key = "time", label = "Time", type = "number", min = 30, max = 300, step = 15, default = 120, format = function(v) return v .. " s" end },
 		{ key = "mode", label = "Rules", type = "choice", choices = { { "a", "Classic" }, { "b", "Chaos" } }, default = "a" },
@@ -137,6 +143,15 @@ mode:Host({
 - `point`: the host flies a free camera there (left stick fly, right stick look,
   triggers down/up) and presses A; arrives as `{ pos = Vector, yaw = degrees }`.
   `required = false` makes it optional.
+- `object`: like `point`, but the host sees the thing itself while placing it:
+  your `draw(obj, alpha)` is called with `obj = { pos, yaw, scale, lift }`
+  wherever they look. D-pad left/right turns it (`rotate = false` to stop
+  that, `turnStep` degrees, 15 by default), D-pad up/down sizes it, X/Y
+  lower and raise it, A puts it down. Give `scale` and/or `lift` as
+  `{ label, min, max, step, default, format }` to offer them. Arrives as
+  that same `obj` table. Placed objects stay drawn (faded) while the host
+  sets the rest up. Basketboard (the hoop), Race (start and finish),
+  Bullseye (the target) and Board Golf (the cup) use it.
 - `mode:SendSequence({ cmd, cmd, ... })` sends commands spaced out (the
   framework rate-limits commands).
 - While the host's game exists, Host Minigame offers `mode:Actions()` (default:
@@ -179,6 +194,32 @@ mode. Follow the built-in modes' `*_server_test.lua` / `*_client_test.lua` for
 fuller examples: they drive `MYMODE.Command(ply, msg, now)` and
 `C.OnState(state, now)` directly.
 
+### Shared by every mode
+
+- **Lobby screen**: while your game is in its `lobby` phase the framework
+  draws who's in, who hosts and what to press. Add your settings with
+  `mode:LobbyLines(function(state) return { "60 s turns" } end)`; set
+  `minPlayers` in `Register` for the "waiting for players (2 / 3)" hint.
+- **Spectating**: `mode:Spectate(ents, { prefer = ent })` (client) watches
+  one of `ents` (entity indexes; `SKATEGM_MODES.Others(state, filter)` lists
+  the others in your game): a chase camera the right stick turns, D-pad
+  left / right for the next one, Y for a free camera. Your own skater is
+  held, hidden and gets no input meanwhile. `prefer` follows that player
+  whenever it changes (the active player in turn-based modes).
+  `mode:Spectate(nil)` hands everything back.
+- **Rocket board / hoverboard**: every `mode:Host` gets "Rocket board" and
+  "Hoverboard" switches (on by default); the framework enforces them for the
+  players of that game while it's being played. `rocket = "force"` in the
+  host definition turns every rocket on, full thrust (Rocket Royale);
+  `boardRules = false` leaves the switches out.
+- **Invites**: a game's menu offers "Invite players"; the invitee gets a
+  toast and joins with LB + RT while the game is still in its lobby.
+
+### Items
+
+Crates, items and hits for your game: see [ITEMS.md](ITEMS.md)
+(`ITEMS.server.Sync` from your think).
+
 ## Respawn (LB + X)
 
 LB + X sends the skater back to the map's spawn (the server asks the
@@ -192,3 +233,12 @@ end)
 ```
 
 `SkateGM.API.Respawn()` does the same from client code.
+
+Punches (RB, off unless the server sets `skategm_punch_allow 1`) never
+land on anyone in a minigame. Any other punch can be refused the same way:
+
+```lua
+hook.Add("SkateGMCanPunch", "myaddon", function(attacker, target)
+	if target:IsPlayer() and NoPvP(target) then return false end
+end)
+```

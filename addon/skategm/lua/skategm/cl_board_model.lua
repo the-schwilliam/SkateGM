@@ -304,7 +304,7 @@ local function DrawRocket(origin, fwd, up, half)
 	return true
 end
 
-local colorMat
+local colorMat, ghostMat
 local function DrawBoardModel(P, o)
 	local graphic, wheel, under, grip, rocket = o.graphic or Color(210, 64, 44), o.wheel, o.under, o.grip, o.rocket
 	local pattern, patternColor = o.pattern, o.patternColor or Color(255, 255, 255)
@@ -328,7 +328,17 @@ local function DrawBoardModel(P, o)
 		["$basetexture"] = "color/white", ["$vertexcolor"] = "1", ["$vertexalpha"] = "0",
 		["$translucent"] = "0", ["$nocull"] = "1",
 	})) or Material("color")
-	render.SetMaterial(colorMat)
+	local ghost = render.GetBlend ~= nil and (render.GetBlend() or 1) < 0.99
+	if ghost then
+		ghostMat = ghostMat or (CreateMaterial and CreateMaterial("skategm_board_vc_ghost", "UnlitGeneric", {
+			["$basetexture"] = "color/white", ["$vertexcolor"] = "1", ["$vertexalpha"] = "0",
+			["$translucent"] = "1", ["$nocull"] = "1",
+		})) or colorMat
+		if ghostMat.SetFloat then ghostMat:SetFloat("$alpha", render.GetBlend()) end
+		pattern, under = nil, nil
+	end
+	local base = ghost and ghostMat or colorMat
+	render.SetMaterial(base)
 	-- deck: centred between the trucks, bottom ~2 units above the axles
 	local M = Matrix()
 	M:SetTranslation((tf + tb) / 2 - up * ((tf + tb) / 2 - wheels):Dot(up) + up * 2.0)
@@ -340,7 +350,7 @@ local function DrawBoardModel(P, o)
 	if pm then
 		render.SetMaterial(pattern)
 		pm:Draw()
-		render.SetMaterial(colorMat)
+		render.SetMaterial(base)
 	end
 	local rm = rocket and not RocketModel() and CachedMesh("rocket", light)
 	if rm then rm:Draw() end
@@ -348,7 +358,7 @@ local function DrawBoardModel(P, o)
 	if um then
 		render.SetMaterial(under)
 		um:Draw()
-		render.SetMaterial(colorMat)
+		render.SetMaterial(base)
 	end
 	cam.PopModelMatrix()
 	if rocket then DrawRocket((tf + tb) / 2 - up * ((tf + tb) / 2 - wheels):Dot(up) + up * 2.0, fwd, up, half) end

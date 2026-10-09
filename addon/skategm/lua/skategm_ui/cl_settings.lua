@@ -69,13 +69,14 @@ function SET.FieldRows(def, rows)
 		return not on or math.floor(NowNum(on.convar, on.default or 1)) == w[2]
 	end
 	for _, f in ipairs(def.fields or {}) do
-		if f.convar and shown(f) then
+		-- (hidden: console only, or shown by the def's own rows)
+		if f.convar and shown(f) and not f.hidden then
 			local label = f.label or f.key
 			if f.kind == "bool" then rows[#rows + 1] = BoolRow(label, f.convar)
 			elseif f.kind == "choice" then
 				local names = {}
 				for i, c in ipairs(f.choices or {}) do names[i] = type(c) == "table" and c[1] or tostring(c) end
-				rows[#rows + 1] = ChoiceRow(label, f.convar, names, shapesPage[f.key] and function() SET.RefreshBoard() end or nil)
+				rows[#rows + 1] = ChoiceRow(label, f.convar, names, (shapesPage[f.key] or f.refresh) and function() SET.RefreshBoard() end or nil)
 			elseif f.kind == "number" then
 				rows[#rows + 1] = NumberRow(label, f.convar, f.min, f.max, (f.max - f.min) / 20, function(v) return string.format("%." .. (f.decimals or 2) .. "f", v) end)
 			elseif f.kind == "color" then rows[#rows + 1] = ColourRow(label, f.convar)
@@ -122,6 +123,18 @@ function SET.PlayerPage()
 			Set("cl_playercolor", string.format("%.3f %.3f %.3f", c.r / 255, c.g / 255, c.b / 255))
 		end),
 	} }
+end
+
+function SET.SkaterPage()
+	local page = SET.PlayerPage()
+	page.title = "Skater"
+	if not SET.StylePage then return page end
+	local rows = { List.Heading("Playermodel") }
+	for _, r in ipairs(page.rows) do rows[#rows + 1] = r end
+	rows[#rows + 1] = List.Heading("Style")
+	for _, r in ipairs(SET.StylePage().rows) do rows[#rows + 1] = r end
+	page.rows = rows
+	return page
 end
 
 function SET.BoardPage()
@@ -198,16 +211,58 @@ function SET.BoardPage()
 		rows[#rows + 1] = row
 	end
 	if def then SET.FieldRows(def, rows) end
-	rows[#rows + 1] = BoolRow("Rocket board", "skategm_rocket")
+	rows[#rows + 1] = SET.RocketRow()
 	rows[#rows + 1] = BoolRow("Hoverboard", "skategm_hoverboard")
 	for _, fx in ipairs(BOARD.EFFECTS) do SET.FieldRows(fx, rows) end
-	local roll, rocket = {}, {}
-	for i, s in ipairs(BOARD.ROLL_SOUNDS) do roll[i] = s[1] end
-	for i, s in ipairs(BOARD.ROCKET_SOUNDS) do rocket[i] = s[1] end
-	rows[#rows + 1] = ChoiceRow("Rolling sound", "skategm_roll_sound", roll, function(i) C.TestSound(BOARD.ROLL_SOUNDS[i][2]) end)
-	rows[#rows + 1] = ChoiceRow("Rocket sound", "skategm_rocket_sound", rocket, function(i) C.TestSound(BOARD.ROCKET_SOUNDS[i][2]) end)
 	rows[#rows + 1] = { label = "Reset my board to default", run = function() if C.Reset then C.Reset() end end }
 	return page
+end
+
+-- Off, Metered (1s / 3s / 5s), Infinite: skategm_rocket + skategm_rocket_fuel
+SET.ROCKET_FUELS = { 1, 3, 5, 0 }
+SET.ROCKET_NAMES = { "off", "metered (1s)", "metered (3s)", "metered (5s)", "infinite" }
+function SET.RocketRow()
+	return List.Choice("Rocket board", SET.ROCKET_NAMES, function()
+		if Now("skategm_rocket", "0") == "0" then return 1 end
+		local f = math.floor(NowNum("skategm_rocket_fuel", 0))
+		for i, v in ipairs(SET.ROCKET_FUELS) do if v == f then return i + 1 end end
+		return #SET.ROCKET_NAMES
+	end, function(i)
+		if i <= 1 then Set("skategm_rocket", 0) return end
+		Set("skategm_rocket", 1)
+		Set("skategm_rocket_fuel", SET.ROCKET_FUELS[i - 1] or 0)
+	end)
+end
+
+local function Percent(v) return string.format("%.0f%%", v * 100) end
+
+function SET.AudioPage()
+	local rows = {
+		List.Heading("Board"),
+		BoolRow("Board sounds", "skategm_sounds"),
+		ChoiceRow("Sound set", "skategm_sound_set", { "Skate 3", "Source Engine" }, nil, 0),
+		NumberRow("Volume", "skategm_sound_volume", 0, 2, 0.1, Percent),
+	}
+	local C = BOARD and BOARD.client
+	if C then
+		local roll, rocket = {}, {}
+		for i, s in ipairs(BOARD.ROLL_SOUNDS) do roll[i] = s[1] end
+		for i, s in ipairs(BOARD.ROCKET_SOUNDS) do rocket[i] = s[1] end
+		rows[#rows + 1] = ChoiceRow("Rolling sound", "skategm_roll_sound", roll, function(i) local S3 = SkateGM and SkateGM.S3 C.TestSound(i == 1 and S3 and S3.On() and S3.RollPath(LocalPlayer(), 500) or BOARD.ROLL_SOUNDS[i][2]) end)
+		rows[#rows + 1] = ChoiceRow("Rocket sound", "skategm_rocket_sound", rocket, function(i) C.TestSound(BOARD.ROCKET_SOUNDS[i][2]) end)
+	end
+	local S = SkateGM
+	if S and S.HudTints then
+		rows[#rows + 1] = List.Heading("Trick display")
+		rows[#rows + 1] = BoolRow("Multiplier sounds", "skategm_hud_sounds")
+	end
+	rows[#rows + 1] = List.Heading("Minigames")
+	rows[#rows + 1] = BoolRow("Cues (countdown beeps, your turn, fades)", "skategm_game_cues")
+	rows[#rows + 1] = BoolRow("Music", "skategm_game_music")
+	rows[#rows + 1] = NumberRow("Music volume", "skategm_music_volume", 0, 1, 0.05, function(v) return v <= 0 and "muted" or Percent(v) end)
+	rows[#rows + 1] = List.Heading("Boombox")
+	rows[#rows + 1] = NumberRow("Boombox volume", "skategm_boombox_volume", 0, 1, 0.05, function(v) return v <= 0 and "muted" or Percent(v) end)
+	return { title = "Audio", rows = rows }
 end
 
 function SET.CameraPage()
@@ -224,6 +279,7 @@ function SET.CameraPage()
 			for i, v in ipairs(values) do if math.abs(v - cur) < 2.5 then best = i end end
 			return best
 		end, function(i) Set("skategm_camera_fov", values[i]) end),
+		ChoiceRow("Camera position", "skategm_camera_type", { "Low", "High" }, nil, 0),
 	} }
 end
 
@@ -232,24 +288,19 @@ function SET.Admin()
 	return (game and game.SinglePlayer and game.SinglePlayer()) or (IsValid(me) and me:IsAdmin())
 end
 
-local function Percent(v) return string.format("%.0f%%", v * 100) end
-
--- everything else: screen and sound, riding, collision, the engine, the park
+-- everything else: the controller, riding, collision, the engine, the park
 -- editor, the server (host and admins), troubleshooting
 function SET.AdvancedPage()
 	local S = SkateGM
 	local rows = {
-		List.Heading("Screen and sound"),
-		BoolRow("Trick score display", "skategm_hud"),
-		BoolRow("Board sounds", "skategm_sounds"),
-		NumberRow("Sound volume", "skategm_sound_volume", 0, 2, 0.1, Percent),
-		NumberRow("Boombox volume", "skategm_boombox_volume", 0, 1, 0.05, function(v) return v <= 0 and "muted" or Percent(v) end),
 		List.Heading("Controller"),
 		ChoiceRow("Button icons", "skategm_button_style", UI.pad.STYLE_NAMES, nil, 0),
 		List.Heading("Riding"),
 		NumberRow("Top speed", "skategm_speed_limit", 0, 60, 5, function(v) return v <= 0 and "no limit" or string.format("%d m/s", v) end),
 		BoolRow("Other players are solid", "skategm_player_collision"),
 		BoolRow("RB off the board uses doors and buttons", "skategm_rb_use"),
+		BoolRow("RB punches (on the ground and on foot)", "skategm_punch"),
+		NumberRow("Landing must hold before tricks score", "skategm_landing_settle", 0, 1, 0.05, function(v) return string.format("%.2f s", v) end),
 		BoolRow("Y does nothing in the air", "skategm_block_air_dismount"),
 		List.Heading("Collision (applies when it's reloaded)"),
 	}
@@ -297,7 +348,7 @@ function SET.AdvancedPage()
 end
 
 function SET.DisplayPage()
-	return { title = "Display", rows = {
+	local rows = {
 		BoolRow("Show the HUD", "skategm_hud"),
 		List.Heading("HUD"),
 		BoolRow("Total score", "skategm_hud_total"),
@@ -307,19 +358,40 @@ function SET.DisplayPage()
 		BoolRow("LB overlay (marker and LB controls)", "skategm_hud_lb"),
 		BoolRow("Marker beacon", "skategm_hud_marker"),
 		BoolRow("Flick-it stick", "skategm_flickit_hud"),
-		List.Heading("Other players"),
-		BoolRow("Show other players' board images", "skategm_show_board_images"),
-	} }
+	}
+	SET.Skate3HudRows(rows)
+	rows[#rows + 1] = List.Heading("Other players")
+	rows[#rows + 1] = BoolRow("Name tags over other skaters", "skategm_nametags")
+	rows[#rows + 1] = BoolRow("Show other players' board images", "skategm_show_board_images")
+	return { title = "Display", rows = rows }
+end
+
+-- Skate 3's own trick display (cl_hud_original.lua)
+function SET.Skate3HudRows(rows)
+	local S = SkateGM
+	if not (S and S.HudTints) then return end
+	rows[#rows + 1] = List.Heading("Skate 3 HUD")
+	rows[#rows + 1] = BoolRow("Skate 3's trick display", "skategm_hud_original")
+	local names = {}
+	for i, t in ipairs(S.HudTints) do names[i] = t[1] end
+	local tint = ChoiceRow("Colour", "skategm_hud_tint", names)
+	tint.sub = "Custom: skategm_hud_color \"r g b\" in the console"
+	rows[#rows + 1] = tint
+	local font = ChoiceRow("Font", "skategm_hud_font_pick", S.HudFonts)
+	font.sub = "Custom: skategm_hud_font \"<any installed font>\" in the console"
+	rows[#rows + 1] = font
 end
 
 function SET.MainPage()
-	return { title = "Settings", rows = {
-		{ label = "Playermodel", page = SET.PlayerPage, sub = "your model and colour" },
-		{ label = "Board", page = SET.BoardPage, sub = "colours, image, effects, sounds" },
+	local rows = {
+		{ label = "Skater", page = SET.SkaterPage, sub = SET.StylePage and "model, colour, stance, style, gestures" or "your model and colour" },
+		{ label = "Board", page = SET.BoardPage, sub = "colours, image, effects" },
 		{ label = "Camera", page = SET.CameraPage, sub = "wobble, distance, field of view" },
 		{ label = "Display", page = SET.DisplayPage, sub = "what the HUD shows" },
+		{ label = "Audio", page = SET.AudioPage, sub = "board sounds, volumes, cues" },
 		{ label = "Advanced", page = SET.AdvancedPage, sub = "everything else" },
-	} }
+	}
+	return { title = "Settings", rows = rows }
 end
 
 ---------------------------------------------------------------------------

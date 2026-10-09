@@ -146,7 +146,10 @@ def write_reference(chunk, path):
 
 
 MIN_ALTITUDE = 2.0
-COLLISION_TIMEOUT = 180
+# (no time limit that splits a model: how long studiomdl takes depends on the
+# PC, and a split only on slower PCs made their map differ - GMod then
+# refuses players whose map isn't the server's. MAX_CONVEX keeps them quick)
+COLLISION_TIMEOUT = 3600
 
 
 def prism(tri, thickness=PIECE_THICKNESS, gap=PIECE_GAP):

@@ -248,6 +248,40 @@ LEVEL_FLAGS_LUMP = 59
 BAKED_PROP_LIGHTING_LDR = 0x1
 
 
+# vbsp leaves the padding byte after each static prop's solid type (byte 31
+# of a version 10, 72-byte prop) uninitialised: whatever was in memory. The
+# engine never reads it, but it made every build of a map differ, and GMod
+# refuses to let a player join whose map isn't byte for byte the server's
+PROP_PADDING = {10: (72, (31,))}
+
+
+def clear_prop_padding(bsp_path):
+    data = bytearray(Path(bsp_path).read_bytes())
+    lump_offset = struct.unpack_from('<i', data, 8 + 35 * 16)[0]
+    count = struct.unpack_from('<i', data, lump_offset)[0]
+    cleared = 0
+    for k in range(count):
+        gid, flags, version, offset, length = struct.unpack_from('<iHHii', data, lump_offset + 4 + k * 16)
+        if gid != struct.unpack('<i', b'prps')[0] or version not in PROP_PADDING:
+            continue
+        size, holes = PROP_PADDING[version]
+        at = offset
+        names = struct.unpack_from('<i', data, at)[0]
+        at += 4 + names * 128
+        leaves = struct.unpack_from('<i', data, at)[0]
+        at += 4 + leaves * 2
+        props = struct.unpack_from('<i', data, at)[0]
+        at += 4
+        if props and (offset + length - at) // props != size:
+            raise ValueError(f'static props of version {version} are not {size} bytes')
+        for i in range(props):
+            for hole in holes:
+                data[at + i * size + hole] = 0
+            cleared += 1
+    Path(bsp_path).write_bytes(bytes(data))
+    return cleared
+
+
 def mark_baked_props(bsp_path):
     data = bytearray(Path(bsp_path).read_bytes())
     offset, length = struct.unpack_from('<ii', data, 8 + LEVEL_FLAGS_LUMP * 16)

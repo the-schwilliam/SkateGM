@@ -173,6 +173,10 @@ pub(super) fn advance(
             super::handplant::ground_update(physics,skater)?;
             input_phase::update_ground(physics, skater)?;
         }
+        // gm_sk8 addition: GrindTrick202 (ported, see grind_trick.rs)
+        skate_core::player::state::PhysicalStateId::PhysicsAirSecondary => {
+            super::grind_trick::advance(physics, skater)?
+        }
         skate_core::player::state::PhysicalStateId::PhysicsAir => {
             super::air_phase::advance(physics, skater)?
         }
@@ -312,7 +316,9 @@ pub(super) fn advance(
     let score = &skater.animation.motion.score_packet;
     let deck_frame = physics.board.part_transforms()[BodyId::Deck.index()];
     let position = deck.rates.position;
-    let velocity = deck.rates.linear_velocity;
+    // gm_sk8 (ported with scoring_runtime.rs): AirCollector82DA81BC..81E4 reads
+    // SystemReckoning+0, the damped COM velocity, not the deck's own velocity.
+    let velocity = skater.centre_of_mass_output.velocity;
     let filtered = skater.player_state.filtered_output;
     skater.scoring.advance(crate::scoring_runtime::Frame {
         tick: tick as u32, dt: simulation.time_step,
@@ -320,10 +326,15 @@ pub(super) fn advance(
         state: skater.player_state.current() as u32,
         descriptor: score.trick_names.first.or_else(||score.grab.map(|g|g.0)),
         grind_id: filtered.map_or(-1, |f|f.grind.scorable_id), flags:score.flags,
-        position:[position.x,position.y,position.z], velocity:[velocity.x,velocity.y,velocity.z],
+        position:[position.x,position.y,position.z], velocity:[velocity[0],velocity[1],velocity[2]],
         forward:deck_frame.basis.columns[2],
         switch:skater.animation.packet.riding_switch,fakie:skater.animation.packet.riding_fakie,
-        nollie:skater.animation.packet.weight_forwards,body_flip:skater.player_input.physical.air.flag_441!=0,
+        regular:skater.animation.packet.regular_stance,
+        player_basis:std::array::from_fn(|i|std::array::from_fn(|j|skater.animated_skeleton.roots.animation_to_world[i][j])),
+        board_basis:deck_frame.basis.columns,
+        reckoning_up:std::array::from_fn(|i|f32::from_bits(skater.player_input.physical.reckoning.vector_96[i])),
+        body_flip:skater.player_input.physical.air.flag_441!=0,
+        front_flip:skater.air_reckoning.state.flip_side,
         suspend_air:skater.player_input.physical.air.use_air_reckoning_452!=0,
         landing:skater.landing_quality,teleported,
         // Revert Fill publishes its active lifetime in State66. State70 is unset.

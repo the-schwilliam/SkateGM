@@ -114,7 +114,11 @@ impl StateSelector {
         if p.has_2468(2) || p.has_2472(0x4_0000) {
             return PhysicalStateId::Teleporting;
         }
-        if self.air_frames > 300 {
+        // gm_sk8 addition: retail sends you back to a checkpoint after 300
+        // frames (5 s) in the air; rocket flights and big drops go longer.
+        // AIR_TELEPORT_FRAMES sets it (0 = never).
+        let limit = AIR_TELEPORT_FRAMES.load(core::sync::atomic::Ordering::Relaxed);
+        if limit > 0 && self.air_frames > limit as i32 {
             self.request_teleport = true;
             return current;
         }
@@ -248,3 +252,6 @@ fn check_for_grind(input: ProcessedStateInput) -> Option<PhysicalStateId> {
 
 #[cfg(test)]
 mod tests;
+
+/// gm_sk8 addition: frames in the air before the checkpoint teleport (0 = never; retail 300).
+pub static AIR_TELEPORT_FRAMES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1800);

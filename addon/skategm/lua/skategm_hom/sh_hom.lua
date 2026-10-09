@@ -1,6 +1,6 @@
 HOM = HOM or {}
 
-HOM.mode = SKATEGM_MODES.Register({ id = "hom", title = "Hall of Meat", order = 7, color = Color(255, 70, 60) })
+HOM.mode = SKATEGM_MODES.Register({ id = "hom", category = "Chaos", title = "Hall of Meat", order = 7, color = Color(255, 70, 60) })
 HOM.NET_STATE, HOM.NET_CMD = HOM.mode.NET_STATE, HOM.mode.NET_CMD
 HOM.cvAllowed = HOM.mode.cvAllowed
 function HOM.Allowed() return HOM.mode:Allowed() end

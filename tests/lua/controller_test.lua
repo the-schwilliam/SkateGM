@@ -56,6 +56,21 @@ S.RocketThink(pose(0, 0, 0x0080, "PhysicsGround", 30.5), 1.2, 1 / 60)
 check("at the rocket's top speed (30 m/s): no more push", pushed == nil)
 S.RocketThink(pose(0, 0, 0x0080, "WipeoutGround", 5), 1.3, 1 / 60)
 check("bailing: rocket off, and everyone told", pushed == nil and sentNet[#sentNet].name == "skategm_rocket" and sentNet[#sentNet].v == false)
+-- a metered rocket (1 s of fuel)
+local cap = 1
+S.RocketFuelCap = function() return cap end
+S.fuel, S.fuelLocked, S.fuelUsedAt = nil, nil, nil
+local fired = 0
+for i = 1, 70 do if S.RocketFuelThink(true, true, 10 + i / 60, 1 / 60) then fired = fired + 1 end end
+check("metered (1 s): fires for a second, then cuts out", fired >= 58 and fired <= 61 and S.fuel == 0 and S.fuelLocked)
+check("... held down while empty: still nothing", not S.RocketFuelThink(true, true, 11.3, 1 / 60))
+S.RocketFuelThink(false, false, 11.32, 1 / 60)
+check("... let go: no longer locked, but empty until it refills", not S.fuelLocked and S.fuel == 0)
+for i = 1, 60 * 4 do S.RocketFuelThink(false, false, 11.4 + i / 60, 1 / 60) end
+check("... a few seconds off the stick: full again", S.fuel == cap)
+check("... and it fires again", S.RocketFuelThink(true, true, 16, 1 / 60) and S.fuel < cap)
+cap = nil
+check("infinite: never runs out", S.RocketFuelThink(true, true, 17, 100) and S.fuel == nil)
 -- RB on foot
 local n = #sentNet
 S.UseThink(pose(0, 0, 0x0200, "PhysicsGround"))
@@ -66,3 +81,10 @@ local u = sentNet[#sentNet]
 check("RB on foot: use, from the head, facing the way the shoulders say", u.name == "skategm_use" and u.fs[3] == 64 and u.vs[1].x > 0.99)
 S.UseThink(pose(0, 0, 0x0200, "BipedGround"))
 check("held down: once, not every frame", #sentNet == n + 1)
+local tilted = Vector(1, 0, 1):GetNormalized()
+local d = S.RocketDirection(tilted, "KnownAir")
+check("rocket in the air: pushes the way the thruster points, nose up included", d and math.abs(d.z - tilted.z) < 1e-6 and math.abs(d.x - tilted.x) < 1e-6)
+d = S.RocketDirection(tilted, "PhysicsGround")
+check("... on the ground: the same", d and math.abs(d.z - tilted.z) < 1e-6)
+d = S.RocketDirection(Vector(0, 0, -1), "PhysicsAir")
+check("... board pointing straight down in the air: straight down", d and d.z < -0.99)

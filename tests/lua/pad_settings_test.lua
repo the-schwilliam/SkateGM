@@ -50,7 +50,7 @@ frame(bit.bor(B.LB, B.A))
 frame(0)
 local labels = {}
 for _, r in ipairs(SET.Top().rows) do labels[#labels + 1] = r.label end
-check("LB + A opens Settings: Playermodel, Board, Camera, Display, Advanced", SET.Active() and table.concat(labels, ",") == "Playermodel,Board,Camera,Display,Advanced" and api.frozen and api.blocked)
+check("LB + A opens Settings: Skater, Board, Camera, Display, Audio, Advanced", SET.Active() and table.concat(labels, ",") == "Skater,Board,Camera,Display,Audio,Advanced" and api.frozen and api.blocked)
 
 go("Display")
 press(B.A)
@@ -71,7 +71,7 @@ check("B goes back to the main page", SET.Top().title == "Settings")
 -- Camera
 go("Camera")
 press(B.A)
-check("Camera has wobble, distance and field of view", SET.Top().title == "Camera" and #SET.Top().rows == 3)
+check("Camera has wobble, distance, field of view and position", SET.Top().title == "Camera" and #SET.Top().rows == 4)
 press(B.A)
 check("A turns the wobble on", cvars_.skategm_camera_shake == "1")
 press(B.DOWN)
@@ -84,11 +84,15 @@ press(B.RIGHT)
 check("field of view: one step from Skate's own is 50 degrees", tonumber(cvars_.skategm_camera_fov) == 50)
 press(B.LEFT)
 check("... and back to Skate's own (0)", tonumber(cvars_.skategm_camera_fov) == 0)
+press(B.DOWN)
+cvars_.skategm_camera_type = "1"
+press(B.LEFT)
+check("camera position: High to Low", cvars_.skategm_camera_type == "0")
 press(B.B)
 check("B goes back to the main page", SET.Top().title == "Settings")
 
 -- Playermodel
-go("Playermodel")
+go("Skater")
 press(B.A)
 check("the playermodel page has a model preview", type(SET.Top().preview) == "function")
 press(B.A)
@@ -97,7 +101,7 @@ for _, r in ipairs(SET.Top().rows) do names[#names + 1] = r.label end
 check("Model lists every playermodel, the current one picked", table.concat(names, ",") == "alyx,barney,kleiner" and SET.Top().sel == 3)
 press(B.UP)
 press(B.A)
-check("A picks it and goes back", cvars_.cl_playermodel == "barney" and SET.Top().title == "Playermodel")
+check("A picks it and goes back", cvars_.cl_playermodel == "barney" and SET.Top().title == "Skater")
 press(B.DOWN)
 press(B.RIGHT)
 check("colour: D-pad right picks the next colour", cvars_.cl_playercolor ~= "0.24 0.34 0.41")
@@ -113,7 +117,8 @@ check("the board page has a board preview", type(SET.Top().preview) == "function
 local rows = {}
 for _, r in ipairs(SET.Top().rows) do rows[#rows + 1] = r.label end
 local all = table.concat(rows, "|")
-check("board options: type, colours, image, the type's own, extras, sounds, reset", all:find("Board type|Deck colour|Wheel colour|Image under the deck|Grip tape pattern|Rocket board|Hoverboard|Rolling sound|Rocket sound|Reset", 1, true) ~= nil)
+check("board options: type, colours, image, the type's own, extras, reset", all:find("Board type|Deck colour|Wheel colour|Image under the deck|Grip tape pattern|Rocket board|Hoverboard|Reset", 1, true) ~= nil)
+check("... no sounds (they're in Audio)", not all:find("Rolling sound", 1, true))
 go("Deck colour")
 press(B.RIGHT)
 check("deck colour: next in the palette", cvars_.skategm_deck_color == SET.COLOURS[2][2])
@@ -159,9 +164,6 @@ pickStatus, pickValue = "failed", "that isn't a PNG or JPG image"
 frame(0)
 check("... a file that isn't an image: says why", SET.note.text:find("isn't a PNG", 1, true) ~= nil)
 pickStatus = "idle"
-go("Rolling sound")
-press(B.RIGHT)
-check("a sound: changed, and played so you hear it", cvars_.skategm_roll_sound == "2" and played[#played] == "b.wav")
 go("Board type")
 press(B.RIGHT)
 check("board type: changed, the page rebuilt for its options (no image row)", cvars_.skategm_board_type == "model" and not table.concat((function() local t = {} for _, r in ipairs(SET.Top().rows) do t[#t + 1] = r.label end return t end)(), "|"):find("Image", 1, true))
@@ -180,6 +182,16 @@ frame(0, 0.5)
 check("... and it holds there for a moment, then spins slowly again", SET.spin == held)
 
 press(B.B)
+go("Audio")
+press(B.A)
+local audio = {}
+for _, r in ipairs(SET.Top().rows) do audio[#audio + 1] = (r.heading and "#" or "") .. r.label end
+local allA = table.concat(audio, "|")
+check("Audio: board sounds, set, volume, rolling, rocket; minigame cues, music; boombox", allA:find("#Board|Board sounds|Sound set|Volume|Rolling sound|Rocket sound", 1, true) and allA:find("#Minigames|Cues", 1, true) and allA:find("fades)|Music|Music volume|#Boombox", 1, true) and allA:find("#Boombox|Boombox volume", 1, true))
+go("Rolling sound")
+press(B.RIGHT)
+check("a sound: changed, and played so you hear it", cvars_.skategm_roll_sound == "2" and played[#played] == "b.wav")
+press(B.B)
 -- Advanced: everything else, in sections
 cvars_.skategm_hud, cvars_.skategm_speed_limit, cvars_.skategm_smooth, cvars_.skategm_smooth_creases, cvars_.skategm_smooth_steps = "1", "0", "1", "1", "8"
 game = { SinglePlayer = function() return false end }
@@ -193,8 +205,8 @@ local adv = SET.Top()
 local labels2 = {}
 for _, r in ipairs(adv.rows) do labels2[#labels2 + 1] = (r.heading and "#" or "") .. r.label end
 local all2 = table.concat(labels2, "|")
-check("Advanced: screen and sound, riding, collision, engine, park editor, troubleshooting", all2:find("#Screen and sound", 1, true) and all2:find("#Riding", 1, true) and all2:find("#Collision", 1, true) and all2:find("#Engine", 1, true) and all2:find("#Park editor", 1, true) and all2:find("#Troubleshooting", 1, true))
-check("... the cursor starts on a setting, not a heading", not adv.rows[adv.sel].heading and adv.rows[adv.sel].label == "Trick score display")
+check("Advanced: controller, riding, collision, engine, park editor, troubleshooting", all2:find("#Controller", 1, true) and not all2:find("sound", 1, true) and all2:find("#Riding", 1, true) and all2:find("#Collision", 1, true) and all2:find("#Engine", 1, true) and all2:find("#Park editor", 1, true) and all2:find("#Troubleshooting", 1, true))
+check("... the cursor starts on a setting, not a heading", not adv.rows[adv.sel].heading and adv.rows[adv.sel].label == "Button icons")
 press(B.UP)
 check("... and moving skips headings", not adv.rows[adv.sel].heading)
 check("... no server section for a player", not all2:find("#Server", 1, true))
@@ -219,3 +231,12 @@ check("an admin also gets the server section", table.concat(labels3, "|"):find("
 press(B.B)
 press(B.B)
 check("B on the main page closes Settings, control back", not SET.Active() and api.frozen == false and api.blocked == false)
+
+SET.StylePage = function() return { title = "Style", rows = { { label = "Stance" }, { label = "Style" } } } end
+local sk = {}
+for _, r in ipairs(SET.SkaterPage().rows) do sk[#sk + 1] = (r.heading and "#" or "") .. r.label end
+check("with the style add-on: one Skater page, Playermodel then Style", table.concat(sk, "|") == "#Playermodel|Model|Colour|#Style|Stance|Style" and SET.SkaterPage().preview ~= nil)
+local main = {}
+for _, r in ipairs(SET.MainPage().rows) do main[#main + 1] = r.label end
+check("... and no separate Style section", table.concat(main, ",") == "Skater,Board,Camera,Display,Audio,Advanced")
+SET.StylePage = nil

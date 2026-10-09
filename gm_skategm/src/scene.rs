@@ -129,6 +129,10 @@ fn in_region(t: &[Vec3; 3], centre: Vec3, half: f32) -> bool {
     max.x >= centre.x - half && min.x <= centre.x + half && max.y >= centre.y - half && min.y <= centre.y + half
 }
 
+/// Narrower than this (map units, across the longest edge), a big triangle
+/// isn't cut into pieces.
+const THIN: f32 = 24.0;
+
 pub fn split_large(tris: Tris, tags: Vec<u8>, max: f32) -> (Tris, Vec<u8>) {
     let (t, g, _) = split_large_weighted(tris, tags, max);
     (t, g)
@@ -144,7 +148,12 @@ pub fn split_large_weighted(tris: Tris, tags: Vec<u8>, max: f32) -> (Tris, Vec<u
         stack.push((t, g, 0));
         while let Some((t, g, depth)) = stack.pop() {
             let ext = (t[0].max(t[1]).max(t[2]) - t[0].min(t[1]).min(t[2])).max_element();
-            if ext <= max || depth >= 8 {
+            // gm_sk8: a long thin one (a handrail's tube, a coping's edge) stays
+            // whole: cut at its edges' middles it left a seam halfway along
+            // the rail that the board caught on (Skate 3's long stair rails)
+            let longest = (t[1] - t[0]).length().max((t[2] - t[1]).length()).max((t[0] - t[2]).length());
+            let width = (t[1] - t[0]).cross(t[2] - t[0]).length() / longest.max(1e-6);
+            if ext <= max || depth >= 8 || (width < THIN && crate::cleanup::on("thinwhole")) {
                 out.push(t);
                 out_tags.push(g);
                 continue;

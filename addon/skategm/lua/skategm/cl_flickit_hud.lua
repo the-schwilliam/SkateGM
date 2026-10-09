@@ -11,13 +11,16 @@ function F.Visible(S)
 		and not (hud and not hud:GetBool()) and not (S.replay and (S.replay.on or S.replay.hudHidden))
 		and not (SKATEGM_UI and SKATEGM_UI.Busy())
 end
+function F.Place(w,h)
+	local radius=math.Clamp(h*.043,30,64)
+	return w-radius-32,h-radius-54,radius
+end
 hook.Add("HUDPaint","skategm_flickit_hud",function()
 	local S=SkateGM
 	if not F.Visible(S) then F.trail={} return end
 	local now=RealTime()
 	local x,y=F.Input(S)
-	local radius=math.Clamp(ScrH()*.043,30,64)
-	local cx,cy=ScrW()-radius-32,ScrH()-radius-54
+	local cx,cy,radius=F.Place(ScrW(),ScrH())
 	local px,py=cx+x*(radius-7),cy-y*(radius-7)
 	local last=F.trail[#F.trail]
 	if not last or ((last.x-x)^2+(last.y-y)^2)>.0004 then F.trail[#F.trail+1]={x=x,y=y,t=now} end
