@@ -4,6 +4,8 @@
 
 <p align="center"><a href="https://discord.gg/cMYSu9ywf">Join the community on Discord</a></p>
 
+<p align="center"><a href="https://www.youtube.com/watch?v=5UXgyk4Bs0A">Official installation tutorial (YouTube)</a></p>
+
 SkateGM runs Skate 3's board physics, tricks and scoring inside Garry's Mod,
 on any map and with friends. It also comes with minigames, a park editor and
 a gamemode built for skating.
@@ -106,7 +108,7 @@ Host one with LB + D-pad left; others join from the same menu.
 | S.K.A.T.E. | Set a trick; everyone else has to land it. Miss and you get a letter; spell it and you're out. |
 | Rocket Royale | Every rocket board fires flat out, the whole time. Last one riding wins. |
 | Bullseye | Jump from the start and land in the target's rings (gold 6, purple 3, blue 2, green 1); steer with the rocket board in the air. |
-| Steezus Stint | Own the Spot, but you score for time held in the Christ Air (grab + B), double while back or front flipping. |
+| Steezus Stint | I'll let you figure this one out. |
 | Ghost Writer | Everyone skates a run unseen; the replays show everyone looking the same. Guess whose run is whose. |
 | Skull Runners | Grab the most floating skulls before time runs out; a bail drops some of yours. |
 | Ball Battle | Hits and bails pop your bouncy balls; lose them all and you're out. Last one with balls wins. |

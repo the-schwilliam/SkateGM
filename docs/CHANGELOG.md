@@ -21,7 +21,7 @@
     - **Hold the Line**: a co-op line passed around the group. When your time's up, the next skater takes over exactly where you are, at the same speed. One bail, or stopping, ends it for everyone.
     - **Basketboard**: get your board, or yourself, through a hoop the host places. One dismount or bail a turn, and touching the no-zone under the hoop ends your turn.
     - **Board Golf**: tee off, ride a few seconds, then your board rolls by itself. Your next shot is from wherever it stops; fewest strokes into the cup wins.
-- **Items** in Skull Runners, Ball Battle, Melon King and Hot Potato: break the floating crates for a Rocket, Grenade, Traffic Cone, Crowbar or Physics Gun, and use it with the left stick. Grenades show their arc and landing spot while you hold one, and explode where they land. Add-ons can add their own items.
+- **Items** in Skull Runners, Ball Battle, Melon King and Hot Potato: break the floating crates for a Rocket, Grenade, Traffic Cone, Crowbar or Physics Gun, and use it with the left stick. Add-ons can add their own items.
 - **Hosting**:
     - The Host menu groups the minigames into Tricks, Sports, Arena, Chaos and Party, and every minigame has a short tagline and a description of how it plays.
     - Presets: pressing `X` in a minigame's host settings saves everything you've set under a name.
