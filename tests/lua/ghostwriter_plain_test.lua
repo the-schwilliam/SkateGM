@@ -20,9 +20,9 @@ S.API.HideOthers(false)
 check("... and back", S.IsHidden(ply) == false)
 RealTime = RealTime or function() return 0 end
 S.API.PlayClip("alphatest", ply, { { t = 0, P = {} }, { t = 1, P = {} } }, { alpha = 0.45 })
-check("a clip can be played see-through (Copycat's setter ghost)", S.clips.alphatest.key.alpha == 0.45)
+check("a clip can be played see-through (Copycat's setter ghost)", S.clips.alphatest.key.sk8Alpha == 0.45)
 S.API.PlayClip("alphatest2", ply, { { t = 0, P = {} } })
-check("... others are drawn solid", S.clips.alphatest2.key.alpha == nil)
+check("... others are drawn solid", S.clips.alphatest2.key.sk8Alpha == nil)
 S.API.StopClip("alphatest") S.API.StopClip("alphatest2")
 local BOB = { Nick = function() return "Bob" end, GetNW2Bool = function() return false end }
 local realValid = IsValid

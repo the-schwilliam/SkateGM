@@ -423,7 +423,14 @@ concommand.Add("skategm_report", function()
 		(cam and P and P.HIPS) and (cam - P.HIPS):Length() or -1, fmt(IsValid(me) and me:GetPos())))
 	local under = S.UnderBoard()
 	print(string.format("[SkateGM] under the board: %s", under and string.format("%s, slope %.0f degrees, %.1f units below", under.what, under.slope, under.gap) or "nothing found"))
-	if S.drawErr then Say("draw error: " .. S.drawErr, true) end
+	local why = {}
+	for k in pairs(S.hiddenWhy or {}) do why[#why + 1] = tostring(k) end
+	local e = models[me]
+	print(string.format("[SkateGM] me: phase %s | hidden by %s%s | model %s%s%s | views %d",
+		tostring(S.phase), #why > 0 and table.concat(why, ", ") or "nothing", S.hideSelf and " + replay" or "",
+		IsValid(e) and tostring(e:GetModel()) or "none", IsValid(e) and (e:GetNoDraw() and ", not drawn" or ", drawn") or "",
+		IsValid(e) and (e.Sk8Rig and ", rigged" or ", NO RIG") or "", S.views and #S.views or 0))
+	for part, msg in pairs(S.drawErrs or {}) do Say("draw error (" .. part .. "): " .. msg, true) end
 	if S.meshErr then Say("board model error (using the simple board): " .. S.meshErr, true) end
 	local n = 0
 	for _ in pairs(S.remote) do n = n + 1 end
@@ -1136,7 +1143,7 @@ function S.PlayClip(id, ply, clip, now, opts)
 	if not (IsValid(ply) and clip and #clip > 0) then return nil end
 	local plain = opts and opts.plain or false
 	local c = { key = S.ClipProxy(ply, plain), clip = clip, start = now or RealTime(), index = 1, plain = plain }
-	c.key.alpha = opts and tonumber(opts.alpha) or nil
+	c.key.sk8Alpha = opts and tonumber(opts.alpha) or nil
 	c.key.nametag = opts and type(opts.nametag) == "string" and opts.nametag or nil
 	S.clips[id] = c
 	return c.key
@@ -1767,24 +1774,41 @@ S.DrawBoard = DrawBoard
 -- Draws one skater: called by the engine when it renders that skater's model
 -- (RenderOverride), so it doesn't depend on any shared render hook. (A hook
 -- can be silently cut short by another add-on returning a value from it.)
+S.drawErrs = S.drawErrs or {}
+function S.DrawError(part, err)
+	if S.drawErrs[part] then return end
+	S.drawErrs[part] = tostring(err)
+	S.drawErr = S.drawErr or S.drawErrs[part]
+	Say("draw error (" .. part .. "): " .. S.drawErrs[part], true)
+	if ErrorNoHalt then ErrorNoHalt("[SkateGM] draw error (" .. part .. "): " .. S.drawErrs[part] .. "\n") end
+end
+
 function S.RenderSkater(e)
 	local P = e.Sk8P
 	if not (P and P.HIPS) then return end
-	local alpha = e.Sk8Ply and (e.Sk8Ply.alpha or (e.Sk8Ply ~= S.watched and S.Separation(e.Sk8Ply) == "ghost" and S.GHOST_ALPHA or nil))
+	local own = type(e.Sk8Ply) == "table" and e.Sk8Ply.sk8Alpha or nil
+	local alpha = e.Sk8Ply and (own or (e.Sk8Ply ~= S.watched and S.Separation(e.Sk8Ply) == "ghost" and S.GHOST_ALPHA or nil))
 	if not alpha and S.InMenu(e.Sk8Ply) then alpha = S.IN_MENU_ALPHA end
 	if alpha and render.SetBlend then render.SetBlend(alpha) end
+	local look
 	local ok, err = pcall(function()
 		local pc = e.Sk8Ply and e.Sk8Ply.GetPlayerColor and e.Sk8Ply:GetPlayerColor()
 		local graphic = pc and Color(math.Clamp(pc.x * 255, 30, 255), math.Clamp(pc.y * 255, 30, 255), math.Clamp(pc.z * 255, 30, 255)) or nil
-		local look = BOARD and BOARD.client and IsValid(e.Sk8Ply) and BOARD.client.LookFor(e.Sk8Ply)
+		look = BOARD and BOARD.client and IsValid(e.Sk8Ply) and BOARD.client.LookFor(e.Sk8Ply)
 		local rocket = (((e.Sk8Ply == LocalPlayer() and cvRocket:GetBool()) or (look and look.rocket) or S.RocketOn(e.Sk8Ply)) and S.RocketAllowed(e.Sk8Ply)) or S.RocketForced(e.Sk8Ply) or false
 		local hover = S.HoverWanted(e.Sk8Ply)
 		if not (BOARD and BOARD.client and BOARD.client.Draw(e.Sk8Ply, P, look, graphic, rocket, hover, DrawBoard)) then
 			DrawBoard(P, { graphic = graphic, rocket = rocket, trucks = not hover })
 		end
+	end)
+	if not ok then S.DrawError("board", err) end
+	ok, err = pcall(function()
 		if BOARD and BOARD.client and BOARD.client.DrawEffects then
-			BOARD.client.DrawEffects(e.Sk8Ply, P, look, e.Sk8State, RealTime(), FrameNumber and FrameNumber())
+			BOARD.client.DrawEffects(e.Sk8Ply, P, look or nil, e.Sk8State, RealTime(), FrameNumber and FrameNumber())
 		end
+	end)
+	if not ok then S.DrawError("board effects", err) end
+	ok, err = pcall(function()
 		if e.Sk8Rig then
 			local frame = FrameNumber and FrameNumber()
 			if not frame or e.Sk8PosedFrame ~= frame then
@@ -1824,7 +1848,7 @@ function S.RenderSkater(e)
 			end
 		end
 	end
-	if not ok and not S.drawErr then S.drawErr = tostring(err) Say("draw error: " .. S.drawErr, true) end
+	if not ok then S.DrawError("skater", err) end
 end
 
 S.HOVER = { lift = 7, bob = 1.6, bobRate = 2.3, roll = 5, rollRate = 1.3, pitch = 3, pitchRate = 1.9, blend = 4 }

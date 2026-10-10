@@ -1,5 +1,9 @@
 # Changelog
 
+## 8.01
+
+- Fixed invisible playermodels when a conflicting add-on also manages player transparency.
+
 ## 8.0
 
 - **Skate 3 board sounds**: extracted from your game when you install. You can switch back to the Source Engine ones in Audio settings.

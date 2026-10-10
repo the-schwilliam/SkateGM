@@ -131,3 +131,33 @@ focus = false
 print("another window in front (a second copy of the game): it doesn't", S.InputBlockWanted() and "OK" or "<-- WRONG")
 print("  and menus don't see the pad either", S.API.Pad() == nil and "OK" or "<-- WRONG")
 focus = true
+
+do
+	local oldBoard = BOARD
+	mine.Sk8Rig, mine.Sk8P, mine.valid = {}, pose(500), true
+	BOARD = { client = { LookFor = function() return nil end, Draw = function() return false end, DrawEffects = function() error("effect broke") end } }
+	local before = drawn.models
+	mine:RenderOverride()
+	print("a board effect that errors doesn't stop the playermodel drawing", drawn.models == before + 1 and "OK" or "<-- WRONG")
+	print("  the error is reported once, naming the part", S.drawErrs["board effects"] and S.drawErrs["board effects"]:find("effect broke") and not S.drawErrs.skater and "OK" or "<-- WRONG")
+	BOARD.client.DrawEffects = nil
+	BOARD.client.Draw = function() error("board broke") end
+	before = drawn.models
+	mine:RenderOverride()
+	print("  a board that errors doesn't either", drawn.models == before + 1 and S.drawErrs.board ~= nil and "OK" or "<-- WRONG")
+	BOARD = oldBoard
+end
+
+do
+	local blends = {}
+	local oldBlend = render.SetBlend
+	render.SetBlend = function(a) blends[#blends + 1] = a end
+	ME.alpha = 0
+	mine.Sk8P, mine.valid = pose(500), true
+	mine:RenderOverride()
+	local faded = false
+	for _, a in ipairs(blends) do if a < 1 then faded = true end end
+	print("another add-on's ply.alpha doesn't make my skater see-through", not faded and "OK" or "<-- WRONG")
+	ME.alpha = nil
+	render.SetBlend = oldBlend
+end
