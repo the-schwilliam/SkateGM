@@ -14,7 +14,7 @@ local mapping={
 }
 local R=include("skategm/cl_retarget_math.lua")
 
--- jigglebone physics actually works
+-- jigglebone can now work with any bone
 local movedist,turncos,every=0.02,0.99995,3
 local function moved(now,before)
 	return (now:GetTranslation()-before:GetTranslation()):LengthSqr()>movedist^2
