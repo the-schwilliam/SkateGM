@@ -13,6 +13,40 @@ local mapping={
 	{"R_Foot","RIGHTFOOT","R_Toe0"},{"R_Toe0","RIGHTTOEBASE"},
 }
 local R=include("skategm/cl_retarget_math.lua")
+
+-- jigglebone physics actually works
+local movedist,turncos,every=0.02,0.99995,3
+local function moved(now,before)
+	return (now:GetTranslation()-before:GetTranslation()):LengthSqr()>movedist^2
+		or now:GetForward():Dot(before:GetForward())<turncos
+		or now:GetUp():Dot(before:GetUp())<turncos
+end
+local function findjigglebone(ent,count,base,targets,engine)
+	local jigglebone ,rest=ent.Sk8Jiggle,ent.Sk8JiggleRest
+	if not jigglebone then
+		jigglebone,rest={},{}
+		ent.Sk8Jiggle,ent.Sk8JiggleRest=jigglebone,rest
+		if BONE_ALWAYS_PROCEDURAL then
+			for id=0,count-1 do
+				if ent:BoneHasFlag(id,BONE_ALWAYS_PROCEDURAL) then jigglebone[id]=true end
+			end
+		end
+	end
+	if (FrameNumber and FrameNumber() or 0)%every~=0 then return jigglebone end
+	for id=0,count-1 do
+		local parent=ent:GetBoneParent(id)
+		if parent>=0 and not jigglebone[id] and not targets[id] and base[id] then
+			local bone,parentbone=engine(id),engine(parent)
+			local inverse=bone and parentbone and parentbone:GetInverse()
+			if inverse then
+				local now=inverse*bone
+				if not rest[id] then rest[id]=now
+				elseif moved(now,rest[id]) then jigglebone[id]=true end
+			end
+		end
+	end
+	return jigglebone
+end
 function M.HeadYaw(ent,P,now)
 	local previous=ent.Sk8GazeSample
 	local dt=previous and now-previous.time or 0
@@ -103,11 +137,12 @@ function M.Apply(ent,P)
 		if engineMatrices[id]==nil then engineMatrices[id]=ent:GetBoneMatrix(id) or false end
 		return engineMatrices[id] or nil
 	end
+	local jigglebone=findjigglebone(ent,count,base,targets,engine)
 	local function solve(id,depth)
 		if finished[id] then return finished[id] end
 		if depth>count then return end
 		local parent=ent:GetBoneParent(id)
-		if not base[id] then
+		if not base[id] or (jigglebone[id] and engine(id)) then
 			local own=engine(id)
 			if not own then return end
 			local parentMatrix=parent>=0 and solve(parent,depth+1) or nil
