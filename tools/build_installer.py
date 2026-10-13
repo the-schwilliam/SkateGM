@@ -7,7 +7,7 @@ Needs Rust (for the converter's refpack.dll) and Python 3; makes its own
 build environment in .build/venv with pinned packages.
 """
 from pathlib import Path
-import glob, os, shutil, subprocess, sys, venv
+import glob, hashlib, io, json, os, shutil, subprocess, sys, tarfile, urllib.request, venv
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / '.build'
@@ -37,9 +37,59 @@ def run(*args, env=None):
     subprocess.run([str(a) for a in args], check=True, env=env)
 
 
+# Wine's _wtempnam only keeps the first three characters of the prefix. A bootloader that uses
+# the C runtime DLL (ours, built with MinGW) then gets a temp folder like "_MEac6a.tmp" instead of
+# "_MEI<pid>...", rejects it ("Security validation failure: unexpected name of application's home
+# directory!") and the installer won't start under Wine or Proton. PyInstaller's prebuilt
+# bootloaders have the C runtime built in, so they don't hit this. Name the folder ourselves.
+TEMPNAM = r'''/* SkateGM: replaces _wtempnam, see tools/build_installer.py */
+static wchar_t *
+_skategm_tempnam(const wchar_t *dir, const wchar_t *prefix, int attempt)
+{
+    LARGE_INTEGER counter;
+    wchar_t *path = malloc(PYI_PATH_MAX * sizeof(wchar_t));
+
+    if (path == NULL) {
+        return NULL;
+    }
+    QueryPerformanceCounter(&counter);
+    if (swprintf(path, PYI_PATH_MAX, L"%ls%ls%06x", dir, prefix, (unsigned int)(counter.LowPart + attempt) & 0xffffff) < 0) {
+        free(path);
+        return NULL;
+    }
+    return path;
+}
+
+'''
+BOOTLOADER_PATCH = 'wine-tempnam'
+
+
+def pyinstaller_source():
+    version = PYINSTALLER.split('==')[1]
+    with urllib.request.urlopen(f'https://pypi.org/pypi/pyinstaller/{version}/json') as r:
+        sdist = next(u for u in json.load(r)['urls'] if u['packagetype'] == 'sdist')
+    with urllib.request.urlopen(sdist['url']) as r:
+        data = r.read()
+    if hashlib.sha256(data).hexdigest() != sdist['digests']['sha256']:
+        raise SystemExit('PyInstaller source download failed its sha256 check')
+    src = BUILD / f'pyinstaller-{version}'
+    shutil.rmtree(src, ignore_errors=True)
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        tar.extractall(BUILD, filter='data')
+    c = src / 'bootloader' / 'src' / 'pyi_utils_win32.c'
+    text = c.read_text(encoding='utf-8')
+    anchor = 'int\npyi_create_temporary_application_directory('
+    call = '_wtempnam(tempdir_path, prefix)'
+    if text.count(anchor) != 1 or text.count(call) != 1:
+        raise SystemExit(f'{c.name} changed in {PYINSTALLER}: check whether the Wine temp folder patch is still needed')
+    c.write_text(text.replace(anchor, TEMPNAM + anchor).replace(call, '_skategm_tempnam(tempdir_path, prefix, i)'),
+                 encoding='utf-8', newline='')
+    return src
+
+
 def own_bootloader():
     marker = VENV / 'own_bootloader.txt'
-    if marker.is_file() and marker.read_text(encoding='utf-8') == PYINSTALLER:
+    if marker.is_file() and marker.read_text(encoding='utf-8') == PYINSTALLER + ' ' + BOOTLOADER_PATCH:
         return
     env = dict(os.environ, PYINSTALLER_COMPILE_BOOTLOADER='1')
     if sys.platform == 'win32' and not shutil.which('gcc'):
@@ -48,9 +98,9 @@ def own_bootloader():
             raise SystemExit('a C compiler is needed for the bootloader: winget install BrechtSanders.WinLibs.POSIX.MSVCRT')
         env['PATH'] = found[0] + os.pathsep + env['PATH']
     run(PY, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', '--force-reinstall', '--no-deps',
-        '--no-binary', 'pyinstaller', PYINSTALLER, env=env)
+        pyinstaller_source(), env=env)
     run(PY, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', PYINSTALLER)
-    marker.write_text(PYINSTALLER, encoding='utf-8')
+    marker.write_text(PYINSTALLER + ' ' + BOOTLOADER_PATCH, encoding='utf-8')
 
 
 def version_file(path):
