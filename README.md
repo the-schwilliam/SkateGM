@@ -31,7 +31,7 @@ own copy.
 ## Install
 
 1. **Subscribe to SkateGM on the
-   [Steam Workshop](https://steamcommunity.com/workshop/browse/?appid=4000&searchtext=SkateGM).**
+   [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3819058525).**
 2. Download **`SkateGM-Setup-<version>.exe`** from the
    [latest release](../../releases/latest).
 3. Close Garry's Mod and run the installer.

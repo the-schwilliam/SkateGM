@@ -1,5 +1,9 @@
 # Changelog
 
+## 9.0 hotfix 3
+
+- **Important installer fix.** If you changed "Converted data goes in" to a folder that already had other files in it (for example the folder your Skate 3 .iso is in), the old installer deleted everything in that folder. We're very sorry. The installer now never deletes anything it didn't create: if the folder you choose already has other files in it, SkateGM puts its data in a "SkateGM data" folder inside it, and Uninstall only removes SkateGM's own files. **Please use this installer, and don't run older ones.**
+
 ## 9.0
 
 - **SkateGM is on the Steam Workshop**: you can get it on Workshop now! Please go subscribe, like, and favorite it for visibility! As with all similar mods, you'll still need to run the installer to use SkateGM, even with the Workshop addon installed.

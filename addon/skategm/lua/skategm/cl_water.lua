@@ -53,8 +53,8 @@ function S.WaterThink(P, state, now)
 		if not ok then WATER.fallback = true end
 	elseif WATER.state == "returning" and now - WATER.t > 0.6 then
 		if wet or WATER.fallback then
-			-- the engine didn't take us out: the last safe spot
-			if S.rescue and S.rescue.Rescue then S.rescue.Rescue(RealTime()) end
+			-- the engine didn't take us out: a respawn, as LB + X
+			if S.Respawn then S.Respawn() end
 			WATER.fallback = false
 		end
 		WATER.state, WATER.t = "fadein", now

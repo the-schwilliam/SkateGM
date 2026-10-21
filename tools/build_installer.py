@@ -110,7 +110,7 @@ def main():
     run(PY, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed', '--noupx', '--name', NAME,
         '--version-file', work / 'version.txt',
         '--paths', ROOT / 'exporter',
-        '--hidden-import', 'numpy', '--hidden-import', 'PIL.Image', '--hidden-import', 'convert', '--hidden-import', 'xiso', '--hidden-import', 'soundfile', '--collect-submodules', 'mapgen',
+        '--hidden-import', 'numpy', '--hidden-import', 'PIL.Image', '--hidden-import', 'convert', '--hidden-import', 'xiso', '--hidden-import', 'datafolder', '--hidden-import', 'soundfile', '--collect-submodules', 'mapgen',
         '--add-binary', f'{refpack}{SEP}tools/asset_pipeline',
         '--add-binary', f'{vtfenc}{SEP}mapgen/native',
         '--add-data', f'{ROOT / "exporter" / "tools"}{SEP}tools',

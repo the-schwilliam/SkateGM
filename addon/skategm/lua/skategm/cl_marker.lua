@@ -14,7 +14,9 @@ local MARK_SOUNDS = { set = "buttons/button9.wav", deny = "buttons/button10.wav"
 function S.MarkerUpdate(m, now, skaterPos)
 	if not m then return end
 	local pos = m.pos and Vector(m.pos[1], m.pos[2], m.pos[3]) or nil
-	local placed = pos and (not MK.pos or (pos - MK.pos):LengthSqr() > 1)
+	local abs = pos and (S.ToAbs and S.ToAbs(pos) or pos)
+	local placed = abs and (not MK.abs or (abs - MK.abs):LengthSqr() > 1)
+	MK.abs = abs
 	if placed then
 		table.insert(H.events, 1, { text = "MARKER SET", col = Color(120, 220, 255), t = now })
 		if cvSounds:GetBool() then surface.PlaySound(MARK_SOUNDS.set) end

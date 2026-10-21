@@ -43,12 +43,12 @@ FROM_DISC = list(dict.fromkeys(['default.xex', 'data/anim', *REQUIRED, *HUD]))
 
 
 def convert(xex, out):
+    import datafolder
     xex = xex.resolve()
+    out = datafolder.claim(out)
     if xex.suffix.lower() == '.iso':
         import xiso
-        out = out.resolve()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='skategm-disc-', dir=out.parent) as disc:
+        with tempfile.TemporaryDirectory(prefix='skategm-disc-', dir=out) as disc:
             print('Reading the files it needs from your disc image', flush=True)
             try:
                 xiso.extract_files(xex, FROM_DISC, disc, lambda text: print(text, flush=True))
@@ -132,33 +132,34 @@ def convert_game(game, out):
 
     from tools.asset_pipeline import asset_exports as exports
 
-    out = out.resolve()
-    stage = out.with_name(out.name + '.partial')
-    shutil.rmtree(stage, ignore_errors=True)
-    stage.mkdir(parents=True)
+    import datafolder
+    out = datafolder.claim(out)
 
     def report(text):
         print(text, flush=True)
 
-    with tempfile.TemporaryDirectory(prefix='skategm-convert-', dir=stage.parent) as work, \
-            (stage / 'conversion.log').open('w', encoding='utf-8') as log:
-        work = Path(work)
-        converted = exports.core(game, stage, work, report, log)
-        exports.character(game, stage, work, report, log, converted)
-        if all((game / path).is_file() for path in HUD):
-            try:
-                exports.gmod_hud(game, stage, work, report, log)
-            except Exception as error:
-                report("Skate 3's trick display was skipped: " + (str(error) or type(error).__name__))
+    with tempfile.TemporaryDirectory(prefix='skategm-stage-', dir=out) as staged:
+        stage = Path(staged)
+        with tempfile.TemporaryDirectory(prefix='skategm-convert-', dir=out) as work, \
+                (stage / 'conversion.log').open('w', encoding='utf-8') as log:
+            work = Path(work)
+            converted = exports.core(game, stage, work, report, log)
+            exports.character(game, stage, work, report, log, converted)
+            if all((game / path).is_file() for path in HUD):
+                try:
+                    exports.gmod_hud(game, stage, work, report, log)
+                except Exception as error:
+                    report("Skate 3's trick display was skipped: " + (str(error) or type(error).__name__))
 
-    assets = stage / 'assets'
-    for needed in ('private/skater.glb', 'private/game.json', 'private/stock/physics-skeletons.json',
-                   'private/stock/skater-collections.json'):
-        if not (assets / needed).is_file():
-            raise RuntimeError(f'Conversion finished without {needed}.')
-    shutil.rmtree(out, ignore_errors=True)
-    stage.rename(out)
+        assets = stage / 'assets'
+        for needed in ('private/skater.glb', 'private/game.json', 'private/stock/physics-skeletons.json',
+                       'private/stock/skater-collections.json'):
+            if not (assets / needed).is_file():
+                raise RuntimeError(f'Conversion finished without {needed}.')
+        for name in ('assets', 'conversion.log'):
+            datafolder.replace(out, name, stage / name)
     report('Skate 3 data ready')
+    return out
 
 
 def main():

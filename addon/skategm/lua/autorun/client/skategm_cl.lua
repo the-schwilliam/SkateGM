@@ -308,8 +308,8 @@ function S.FrameShifted(delta)
 	S.passLast = nil
 end
 
--- every placement of the skater (a teleport, a respawn, a minigame's start,
--- a rescue) goes through the wrapped Activate: what's kept from before it is
+-- every placement of the skater (a teleport, a respawn, a minigame's start)
+-- goes through the wrapped Activate: what's kept from before it is
 -- let go here, and everyone else hears it (hook SkateGMTeleported)
 function S.Teleported()
 	presentation.Reset(renderBuffer) S.renderP=nil S.renderCam=nil S.renderState=nil S.renderFrame=nil
@@ -476,7 +476,6 @@ function S.Leave(tellServer)
 		if why ~= "replay" then S.SetHidden(why, false) end
 	end
 	WATER.state, WATER.fade = "dry", 0
-	if S.rescue then S.rescue.safe, S.rescue.airSince, S.rescue.groundSince = nil, nil, nil end
 	if S.infmap then S.infmap.waiting = nil end
 	if tellServer and S.phase == "on" then
 		local pos = S.pose and S.pose.pos and V(S.pose.pos) or LocalPlayer():GetPos()
@@ -2251,7 +2250,6 @@ include("skategm/cl_stream.lua")
 include("skategm/sh_space.lua")
 include("skategm/sh_cells.lua")
 include("skategm/cl_cells.lua")
-include("skategm/cl_rescue.lua")
 ---------------------------------------------------------------------------
 -- Public interface for other add-ons and game modes (e.g. skategm_ots, Own
 -- the Spot). They use only this; everything else here may change.

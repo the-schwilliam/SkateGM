@@ -1,4 +1,4 @@
-for _, f in ipairs({ "sound", "hud", "marker", "water", "why", "trace", "board_model", "settings", "replay", "replay_cam", "replay_fx", "replay_export", "infmap", "keyboard", "presentation", "retarget", "retarget_math", "flickit_hud", "boundary", "nametags", "replay_loop", "hud_original", "skate3_music", "rumble", "stream", "cells", "rescue" }) do AddCSLuaFile("skategm/cl_" .. f .. ".lua") end
+for _, f in ipairs({ "sound", "hud", "marker", "water", "why", "trace", "board_model", "settings", "replay", "replay_cam", "replay_fx", "replay_export", "infmap", "keyboard", "presentation", "retarget", "retarget_math", "flickit_hud", "boundary", "nametags", "replay_loop", "hud_original", "skate3_music", "rumble", "stream", "cells" }) do AddCSLuaFile("skategm/cl_" .. f .. ".lua") end
 AddCSLuaFile("skategm/sh_space.lua")
 AddCSLuaFile("skategm/sh_cells.lua")
 include("skategm/sh_space.lua")

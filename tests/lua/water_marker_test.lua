@@ -43,19 +43,30 @@ print("screen fades to dark:", maxFade >= 0.99 and "OK" or "<-- WRONG " .. maxFa
 print("then back to Skate 3's checkpoint (once):", calls.checkpoint == 1 and "OK" or "<-- WRONG " .. calls.checkpoint)
 for _ = 1, 90 do frame(10) end -- the engine put us back on dry ground
 print("fades back in and is ready again:", W.state == "dry" and W.fade == 0 and #calls.activate == 0 and "OK" or "<-- WRONG " .. W.state)
--- if the engine can't return, the last safe spot (the rescue's) is used instead
-local rescued = 0
-S.rescue = { Rescue = function() rescued = rescued + 1 return true end }
+-- if the engine can't return, a respawn (as LB + X) gets us out instead
+local respawns = 0
+local realRespawn = S.Respawn
+S.Respawn = function() respawns = respawns + 1 end
 checkpointOK = false
 for _ = 1, 20 do frame(-5, "PhysicsAir") end
 for _ = 1, 120 do frame(-20, "PhysicsAir") end
-print("fallback to the last safe spot:", rescued == 1 and "OK" or "<-- WRONG")
+S.Respawn = realRespawn
+print("fallback: a respawn, once:", respawns == 1 and "OK" or "<-- WRONG")
 
 -- markers
 S.H.events = {}
 S.MarkerUpdate({ active = true, canPlace = true, canReturn = false, progress = 0 }, clock)
 S.MarkerUpdate({ active = true, canPlace = true, canReturn = true, progress = 0, pos = { 100, 50, 10 } }, clock)
 print("marker set: call-out + sound:", S.H.events[1] and S.H.events[1].text == "MARKER SET" and ui[#ui]:find("button9") and "OK" or "<-- WRONG")
+do
+	local realOffset, sets = S.Offset, #S.H.events
+	S.Offset = function() return Vector(8192, 0, 0) end
+	S.MarkerUpdate({ active = true, canPlace = true, canReturn = true, progress = 0, pos = { 100 - 8192, 50, 10 } }, clock)
+	print("crossing into the next cell (same marker, new frame): no call-out", #S.H.events == sets and "OK" or "<-- WRONG")
+	S.Offset = realOffset
+	S.MarkerUpdate({ active = true, canPlace = true, canReturn = true, progress = 0, pos = { 100, 50, 10 } }, clock)
+	print("... nor coming back", #S.H.events == sets and "OK" or "<-- WRONG")
+end
 -- (keyboard marker keys are gone: controller only)
 S.MarkerUpdate({ active = true, canPlace = false, canReturn = true, progress = 0.8, pos = { 100, 50, 10 } }, clock)
 S.MarkerUpdate({ active = false, canPlace = false, canReturn = true, progress = 0, pos = { 100, 50, 10 } }, clock, Vector(100, 50, 40))

@@ -35,7 +35,7 @@ DLL = 'gmcl_skategm_win64.dll'
 BIN_EXTRAS = ['skategm_sdl2.dll', 'skategm_gamecontrollerdb.txt']
 OLD_FILES = ['lua/bin/gmcl_sk8_win64.dll']
 OLD_ADDONS = ['skate3_native', 'skategm']
-WORKSHOP_ID = ''
+WORKSHOP_ID = '3819058525'
 WORKSHOP_URL = (f'https://steamcommunity.com/sharedfiles/filedetails/?id={WORKSHOP_ID}' if WORKSHOP_ID
                 else 'https://steamcommunity.com/workshop/browse/?appid=4000&searchtext=SkateGM')
 DEFAULT_DATA = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'SkateGM' / 'data'
@@ -133,10 +133,20 @@ def data_ready(data):
     return all((assets / f).is_file() for f in ('private/skater.glb', 'private/game.json', 'private/stock/physics-skeletons.json'))
 
 
+def data_folder(data, report=None):
+    import datafolder
+    chosen = Path(data).resolve()
+    actual = datafolder.usable(chosen)
+    if report and actual != chosen:
+        report(f'{chosen} already has other files in it, so the game data goes in {actual} '
+               '(SkateGM never deletes anything it did not create).')
+    return actual
+
+
 def convert(xex, data, report):
     import convert as exporter
     report('Converting your game data (a few minutes)...')
-    exporter.convert(Path(xex), Path(data))
+    return exporter.convert(Path(xex), Path(data))
 
 
 IN_USE = "Some SkateGM files are in use: close Garry's Mod (and any window showing its addons folder) and try again."
@@ -156,13 +166,13 @@ def install(gmod, xex, data, report, skip_convert=False, build_maps=True, map_na
     if not is_gmod(gmod):
         raise RuntimeError(f"{gmod} doesn't look like Garry's Mod (no garrysmod folder).")
     garrysmod = gmod / 'garrysmod'
-    data = Path(data)
+    data = data_folder(data, report)
     if skip_convert and data_ready(data):
         report('Game data: already converted, keeping it')
     else:
         if not xex:
             raise RuntimeError("Choose your Skate 3 disc image (.iso) or default.xex.")
-        convert(xex, data, report)
+        data = convert(xex, data, report)
         remember_source(data, xex)
     if not data_ready(data):
         raise RuntimeError('The game data conversion did not finish.')
@@ -310,9 +320,14 @@ def uninstall(gmod, data, report, remove_data=False):
     (garrysmod / 'data' / 'skategm' / 'skate3_sounds.json').unlink(missing_ok=True)
     remove_tree(garrysmod / 'addons' / 'skategm_s3music')
     (garrysmod / 'data' / 'skategm' / 'skate3_music.json').unlink(missing_ok=True)
+    removed = False
     if remove_data:
-        shutil.rmtree(data, ignore_errors=True)
-    report('SkateGM removed.' + (' Your converted game data was deleted too.' if remove_data else ''))
+        import datafolder
+        try:
+            removed = datafolder.remove(data_folder(data))
+        except datafolder.NotOurs as error:
+            report(str(error))
+    report('SkateGM removed.' + (' Your converted game data was deleted too.' if removed else ''))
 
 
 # --------------------------------------------------------------------------
@@ -345,7 +360,7 @@ def window():
 
     root = tk.Tk()
     root.title(TITLE)
-    root.resizable(False, False)
+    root.resizable(True, True)
     pad = {'padx': 10, 'pady': 4}
 
     found = find_gmod()
@@ -354,8 +369,36 @@ def window():
     skate2_var = tk.StringVar()
     data_var = tk.StringVar(value=str(DEFAULT_DATA))
 
-    frm = ttk.Frame(root, padding=12)
-    frm.grid()
+    outer = ttk.Frame(root)
+    outer.pack(fill='both', expand=True)
+    canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0,
+                       background=ttk.Style().lookup('TFrame', 'background') or None)
+    scroll = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
+    canvas.configure(yscrollcommand=scroll.set)
+    canvas.pack(side='left', fill='both', expand=True)
+    frm = ttk.Frame(canvas, padding=12)
+    canvas.create_window((0, 0), window=frm, anchor='nw')
+
+    def fit(_=None):
+        w, h = frm.winfo_reqwidth(), frm.winfo_reqheight()
+        room = max(300, root.winfo_screenheight() - 170)
+        canvas.configure(scrollregion=(0, 0, w, h), width=w, height=min(h, room))
+        root.after_idle(need_scroll)
+
+    def need_scroll(_=None):
+        if frm.winfo_reqheight() > canvas.winfo_height() > 1:
+            if not scroll.winfo_ismapped():
+                scroll.pack(side='right', fill='y', before=canvas)
+        elif scroll.winfo_ismapped():
+            scroll.pack_forget()
+            canvas.yview_moveto(0)
+    frm.bind('<Configure>', fit)
+    canvas.bind('<Configure>', need_scroll)
+
+    def wheel(e):
+        if scroll.winfo_ismapped() and not str(e.widget).endswith('text'):
+            canvas.yview_scroll(int(-e.delta / 120) or (-1 if e.delta > 0 else 1), 'units')
+    root.bind_all('<MouseWheel>', wheel)
     header = ttk.Frame(frm)
     header.grid(column=0, row=0, columnspan=3, sticky='w')
     try:
@@ -449,8 +492,8 @@ def window():
     bar = ttk.Progressbar(frm, mode='indeterminate', length=520)
     bar.grid(column=0, row=11, columnspan=3)
 
-    buttons = ttk.Frame(frm)
-    buttons.grid(column=0, row=12, columnspan=3, pady=(8, 0), sticky='e')
+    buttons = ttk.Frame(root, padding=(12, 4, 22, 12))
+    buttons.pack(side='bottom', anchor='e', before=outer)
 
     seen = {}
 
